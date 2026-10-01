@@ -4,21 +4,35 @@ import { randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { z, ZodError } from 'zod';
-import { type SQL, migrate } from './database.js';
+import { type SQL, migrate } from './sql.js';
 import { authenticator } from './auth.js';
 import { Store } from './store.js';
+import { syncRepositories } from './repository-sync.js';
 import { DomainError, taskInput } from './domain.js';
 import { models } from './fixtures.js';
 import { seed } from './seed.js';
 import { ModelRouter } from './models.js';
 import { GitHubApp } from './github.js';
 import { SupabaseCheckpoints } from './artifacts.js';
+import { limits } from './agent.js';
 import { GitHubAuthorization } from './github-oauth.js';
 export async function createServer(
   db: SQL,
-  { demo = true, logger = false }: { demo?: boolean; logger?: boolean } = {},
+  {
+    demo = true,
+    logger = false,
+    migrateSchema = true,
+    nativeRateLimit = false,
+    transport = Fastify,
+  }: {
+    demo?: boolean;
+    logger?: boolean;
+    migrateSchema?: boolean;
+    nativeRateLimit?: boolean;
+    transport?: typeof Fastify;
+  } = {},
 ) {
-  await migrate(db);
+  if (migrateSchema) await migrate(db);
   if (demo) await seed(db);
   if (!demo) {
     const tables = [
@@ -44,17 +58,49 @@ export async function createServer(
     if (secured.length !== tables.length)
       throw new Error('Apply Supabase security migration before starting production');
   }
-  const app = Fastify({
+  const app = transport({
     logger: logger
       ? { redact: ['req.headers.authorization', 'req.headers.cookie', 'body.githubToken'] }
       : false,
     bodyLimit: 20000,
     requestTimeout: 30000,
   });
-  await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
+  // Routes validate input with Zod; JSON serialization needs no runtime code generation.
+  app.setSerializerCompiler(() => JSON.stringify);
+  app.setValidatorCompiler(() => () => true);
+  if (!nativeRateLimit) app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
   const store = new Store(db);
   const authenticate = authenticator(demo, db);
-  const router = new ModelRouter();
+  const router = new ModelRouter(demo ? '[]' : undefined);
+  const githubIdentity = async (authorization: string | undefined): Promise<string> => {
+    const response = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
+      headers: { Authorization: authorization!, apikey: process.env.SUPABASE_PUBLISHABLE_KEY! },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new DomainError(401, 'Sign in again');
+    const user = (await response.json()) as any;
+    const identity = user.identities?.find((i: any) => i.provider === 'github');
+    const id = identity?.identity_data?.provider_id ?? identity?.identity_data?.sub;
+    if (!id) throw new DomainError(403, 'Sign in with GitHub first');
+    return String(id);
+  };
+  const repositoryAccess = async (
+    req: { userId: string; headers: { authorization?: string } },
+    project: { installationId: number; owner: string; name: string },
+  ) => {
+    const github = new GitHubApp();
+    if (
+      await github.isAccountInstallation(
+        await githubIdentity(req.headers.authorization),
+        project.installationId,
+      )
+    )
+      return;
+    await github.assertUserAccess(
+      await new GitHubAuthorization(db).token(req.userId),
+      `${project.owner}/${project.name}`,
+    );
+  };
   app.decorateRequest('userId', '');
   app.decorateRequest('rawBody', null);
   app.removeContentTypeParser('application/json');
@@ -88,6 +134,15 @@ export async function createServer(
             : 'Invalid request',
     });
   });
+  app.get('/auth/config', async () => ({
+    demo,
+    ...(!demo
+      ? {
+          supabaseURL: process.env.SUPABASE_URL,
+          publishableKey: process.env.SUPABASE_PUBLISHABLE_KEY,
+        }
+      : {}),
+  }));
   app.get('/health', async () => ({
     status: 'ok',
     service: 'Pocket API',
@@ -99,9 +154,9 @@ export async function createServer(
       ? `https://github.com/apps/${process.env.GITHUB_APP_SLUG}/installations/new`
       : null,
     limits: {
-      maxSteps: 24,
-      maxRuntimeSeconds: 600,
-      maxTokens: 60000,
+      maxSteps: limits.steps,
+      maxRuntimeSeconds: limits.runtimeMs / 1000,
+      maxTokens: limits.tokens,
       maxRetries: 1,
       maxConcurrentAgents: 2,
       maxTerminalOutput: 16000,
@@ -112,6 +167,41 @@ export async function createServer(
   app.get<{ Params: { id: string } }>('/v1/projects/:id', (req) =>
     store.project(req.userId, z.uuid().parse(req.params.id)),
   );
+  app.get<{ Params: { id: string } }>('/v1/projects/:id/branches', async (req) => {
+    const project = await store.project(req.userId, z.uuid().parse(req.params.id));
+    if (demo) return project.branches;
+    const linked = project as typeof project & { installationId: number; repositoryId: number };
+    await repositoryAccess(req, linked);
+    const branches = await new GitHubApp().branches(
+      linked.installationId,
+      linked.repositoryId,
+      `${project.owner}/${project.name}`,
+    );
+    await db.query("UPDATE projects SET data=jsonb_set(data,'{branches}',$2::jsonb) WHERE id=$1", [
+      project.id,
+      JSON.stringify(branches),
+    ]);
+    return branches;
+  });
+  app.delete<{ Params: { id: string } }>('/v1/jobs/:id', (req) =>
+    store.deleteJob(req.userId, z.uuid().parse(req.params.id)),
+  );
+  app.delete<{ Params: { id: string; saveId: string } }>(
+    '/v1/projects/:id/saves/:saveId',
+    async (req) => {
+      const ref = await store.deleteSave(
+        req.userId,
+        z.uuid().parse(req.params.id),
+        z.uuid().parse(req.params.saveId),
+      );
+      if (!demo) await new SupabaseCheckpoints().remove(ref);
+      await db.query(
+        "UPDATE saves SET data=jsonb_set(data,'{artifactDeleted}','true') WHERE id=$1",
+        [req.params.saveId],
+      );
+      return { deleted: true };
+    },
+  );
   app.get('/v1/jobs', (req) => store.jobs(req.userId));
   app.post('/v1/jobs', async (req, reply) => {
     const input = taskInput.parse(req.body);
@@ -119,10 +209,7 @@ export async function createServer(
     if (!demo) {
       router.resolve(input.modelId);
       const project = await store.project(req.userId, input.projectId);
-      await new GitHubApp().assertUserAccess(
-        await new GitHubAuthorization(db).token(req.userId),
-        `${project.owner}/${project.name}`,
-      );
+      await repositoryAccess(req, project as typeof project & { installationId: number });
     }
     const job = await store.create(req.userId, input, key, demo);
     return reply.code(202).send(job);
@@ -153,7 +240,7 @@ export async function createServer(
     return store.restore(req.userId, z.uuid().parse(req.params.id), body.saveId, body.branch);
   });
   app.get('/v1/usage', async (req) => {
-    const rows = await store.jobs(req.userId);
+    const rows = await store.jobs(req.userId, true);
     const usage = (
       await db.query(
         'SELECT coalesce(sum(u.cost_cents),0) AS cost FROM usage u JOIN jobs j ON u.job_id=j.id WHERE j.user_id=$1',
@@ -196,80 +283,36 @@ export async function createServer(
       }
     },
   );
+  app.get('/v1/github/installations', async (req) => {
+    if (demo) throw new DomainError(409, 'GitHub connection is disabled in demo mode');
+    const github = new GitHubApp();
+    const personal = await github.installationsForAccount(
+      await githubIdentity(req.headers.authorization),
+    );
+    try {
+      const authorized = await github.installationsForUser(
+        await new GitHubAuthorization(db).token(req.userId),
+      );
+      return [...new Map([...personal, ...authorized].map((i) => [i.id, i])).values()];
+    } catch (error) {
+      if (error instanceof DomainError && error.statusCode === 401) return personal;
+      throw error;
+    }
+  });
   app.post('/v1/github/connect', async (req) => {
     if (demo) throw new DomainError(409, 'GitHub connection is disabled in demo mode');
     const body = z.object({ installationId: z.number().int().positive() }).strict().parse(req.body);
-    // The Supabase GitHub OAuth identity must match the supplied GitHub provider token.
-    const identity = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
-      headers: {
-        Authorization: req.headers.authorization!,
-        apikey: process.env.SUPABASE_PUBLISHABLE_KEY!,
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!identity.ok) throw new DomainError(401, 'Sign in again');
-    const user = (await identity.json()) as any;
-    const githubToken = await new GitHubAuthorization(db).token(req.userId);
-    const gh = await fetch('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${githubToken}`,
-        Accept: 'application/vnd.github+json',
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!gh.ok) throw new DomainError(403, 'GitHub session is invalid');
-    const githubUser = (await gh.json()) as any;
-    if (
-      !user.identities?.some(
-        (i: any) =>
-          i.provider === 'github' &&
-          String(i.identity_data?.provider_id ?? i.identity_data?.sub) === String(githubUser.id),
-      )
-    )
-      throw new DomainError(403, 'GitHub identity does not match your Pocket account');
+    const githubId = await githubIdentity(req.headers.authorization);
     const github = new GitHubApp();
-    await github.verifyInstallation(githubToken, body.installationId);
-    const repos = await github.repositoriesForUser(githubToken, body.installationId);
-    for (const repo of repos) {
-      const branches = await github.branches(body.installationId, repo.id, repo.full_name);
-      const project = {
-        id: randomUUID(),
-        name: repo.name,
-        owner: repo.owner.login,
-        description: repo.description ?? '',
-        language: repo.language ?? '',
-        color: '#819477',
-        branch: repo.default_branch,
-        branches,
-        memory: {
-          stack: repo.language ? [repo.language] : [],
-          objective: '',
-          decisions: [],
-          recentWork: [],
-        },
-        installationId: body.installationId,
-        repositoryId: repo.id,
-        updatedAt: new Date().toISOString(),
-      };
-      await db.transaction(async (tx) => {
-        const existing = (
-          await tx.query(
-            "SELECT id FROM projects WHERE data->>'repositoryId'=$1 AND data->>'installationId'=$2",
-            [String(repo.id), String(body.installationId)],
-          )
-        ).rows[0];
-        const id = existing?.id ?? project.id;
-        project.id = id as typeof project.id;
-        await tx.query(
-          "INSERT INTO projects(id,data) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET data=projects.data || jsonb_build_object('branches',$3::jsonb,'branch',$4::text)",
-          [id, JSON.stringify(project), JSON.stringify(branches), repo.default_branch],
-        );
-        await tx.query(
-          'INSERT INTO memberships(user_id,project_id) VALUES($1,$2) ON CONFLICT DO NOTHING',
-          [req.userId, id],
-        );
-      });
+    let repos;
+    if (await github.isAccountInstallation(githubId, body.installationId)) {
+      repos = await github.repositories(body.installationId);
+    } else {
+      const token = await new GitHubAuthorization(db).token(req.userId);
+      await github.verifyInstallation(token, body.installationId);
+      repos = await github.repositoriesForUser(token, body.installationId);
     }
+    await syncRepositories(db, req.userId, body.installationId, repos);
     return store.projects(req.userId);
   });
   app.post<{ Params: { id: string } }>('/v1/jobs/:id/ship', async (req, reply) => {
@@ -286,6 +329,8 @@ export async function createServer(
     const key = z.string().min(8).max(100).parse(req.headers['idempotency-key']);
     if (job.status !== 'completed' || !job.report)
       throw new DomainError(409, 'Wait for the agent to finish');
+    if (job.report.checkpointAvailable === false || !job.report.files.length)
+      throw new DomainError(409, 'No saved changes available to publish');
     if (job.report.checks.some((c) => c.status === 'failed'))
       throw new DomainError(409, 'Resolve failing checks before shipping');
     const existing = (
@@ -303,10 +348,16 @@ export async function createServer(
     const actionId = randomUUID();
     const branch = `pocket/${id.slice(0, 8)}-${actionId.slice(0, 8)}`;
     const action = { jobId: id, kind: body.kind, title: body.title, branch, demo };
-    const inserted = await db.query(
-      "INSERT INTO actions(id,user_id,job_id,kind,status,data,idempotency_key) VALUES($1,$2,$3,$4,'pending',$5,$6) ON CONFLICT(user_id,idempotency_key) DO NOTHING RETURNING id",
-      [actionId, req.userId, id, body.kind, JSON.stringify(action), key],
-    );
+    const inserted = await db.transaction(async (tx) => {
+      const latest = (await tx.query('SELECT data FROM jobs WHERE id=$1 FOR UPDATE', [id])).rows[0]
+        ?.data as any;
+      if (latest?.report?.checkpointAvailable === false)
+        throw new DomainError(409, 'Checkpoint was deleted');
+      return tx.query(
+        "INSERT INTO actions(id,user_id,job_id,kind,status,data,idempotency_key) VALUES($1,$2,$3,$4,'pending',$5,$6) ON CONFLICT(user_id,idempotency_key) DO NOTHING RETURNING id",
+        [actionId, req.userId, id, body.kind, JSON.stringify(action), key],
+      );
+    });
     if (!inserted.rows.length) throw new DomainError(409, 'This action is already in progress');
     try {
       let result: unknown;
@@ -320,10 +371,7 @@ export async function createServer(
         };
       else {
         const project = (await store.project(req.userId, job.projectId)) as any;
-        await new GitHubApp().assertUserAccess(
-          await new GitHubAuthorization(db).token(req.userId),
-          `${project.owner}/${project.name}`,
-        );
+        await repositoryAccess(req, project);
         const saved = await new SupabaseCheckpoints().get(job.report.snapshotRef);
         result = {
           ...action,
@@ -418,7 +466,7 @@ export async function createServer(
     });
     return reply.code(204).send();
   });
-  const preview = fileURLToPath(new URL('../../preview/', import.meta.url));
+  const preview = demo ? fileURLToPath(new URL('../../preview/', import.meta.url)) : '';
   for (const [url, file, mime] of [
     ['/', 'index.html', 'text/html'],
     ['/style.css', 'style.css', 'text/css'],

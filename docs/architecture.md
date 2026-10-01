@@ -7,7 +7,7 @@ flowchart TD
   A[SwiftUI iPhone] -->|Supabase JWT| B[Pocket TypeScript API]
   B --> C[Supabase PostgreSQL]
   C --> Q[PostgreSQL job queue]
-  D[Cloudflare scheduled dispatcher] -->|Only if queued work exists| W[Pocket Agent request]
+  D[Cloudflare minute schedule] -->|Only if queued work exists| W[Agent invocation]
   Q --> W
   W --> S[Daytona ephemeral sandbox]
   S --> G[Authorized GitHub repository]
@@ -21,9 +21,9 @@ flowchart TD
 
 ## Compute follows work
 
-Users have no permanent VM, container, or sandbox. A claim starts a sandbox; completion/failure/cancellation deletes it. Idle users have only database rows and bounded checkpoint storage. The API runs with zero minimum instances, and production disables its local polling loop. `/internal/drain` holds one authenticated HTTP request for one job; this is compatible with request-based serverless billing. The dispatcher checks the shared queue once a minute and starts up to four drains per invocation, allowing concurrency to grow with active work. No API wake-up occurs when the queue is empty.
+Users have no permanent VM, container, or sandbox. A claim starts a sandbox; completion/failure/cancellation deletes it. Idle users have only database rows and bounded checkpoint storage. The API runs on Cloudflare Workers. A minute schedule inspects the shared queue and starts one claim per invocation when work exists. Empty queues create neither a SQL socket nor compute. Hyperdrive caps origin connections at five and verifies the Supabase certificate. User count does not allocate environments.
 
-The initial server remains Node because Fastify, PostgreSQL connections, and Daytona’s SDK are already compatible there. Cloudflare owns lightweight dispatch. A pure edge API/agent workflow can replace these adapters later; the current implementation does not claim to be a Workers-native service.
+The cloud HTTP transport avoids runtime JavaScript compilation. Local Fastify and cloud routing share all application handlers and authorization rules. Provider-neutral interfaces surround models, sandboxes, GitHub and job claims. No separate fleet or persistent polling process is needed in production.
 
 ## Queue and state
 
@@ -35,11 +35,11 @@ Expired running jobs fail closed. They are not automatically replayed because re
 
 | Resource               | Initial limit                                    |
 | ---------------------- | ------------------------------------------------ |
-| Agent actions          | 24                                               |
-| Overall agent runtime  | 10 minutes                                       |
+| Agent actions          | 6 cloud free / 24 local                          |
+| Overall agent runtime  | 3 minutes cloud free / 10 local                  |
 | Terminal command       | 120 seconds                                      |
 | Terminal output        | 16,000 bytes; process group killed when exceeded |
-| Task model tokens      | 60,000 cumulative                                |
+| Task model tokens      | 18,000 cloud free / 60,000 local                 |
 | Model output per call  | 2,400 tokens                                     |
 | Invalid action retries | 1                                                |
 | Active jobs per user   | 2                                                |

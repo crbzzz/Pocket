@@ -3,119 +3,179 @@ import SwiftUI
 
 struct ChatView: View {
   @Environment(PocketStore.self) private var store
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var memory = false
   @FocusState private var composing: Bool
   var body: some View {
     @Bindable var store = store
-    ScrollViewReader { proxy in
-      ScrollView {
-        VStack(alignment: .leading, spacing: 23) {
-          PageHeading(
-            eyebrow: "From thought to shipped.", title: "What’s on your mind?",
-            subtitle: "One message. A little less on your plate.")
-          if let project = store.project {
-            HStack(spacing: 6) {
-              Menu {
-                ForEach(store.projects) { p in Button(p.name) { store.select(p) } }
-              } label: {
-                Text(project.name).font(.system(size: 12, weight: .medium))
-              }
-              Text("/").foregroundStyle(PocketStyle.muted)
-              Menu {
-                ForEach(project.branches, id: \.self) { b in Button(b) { store.branch(b) } }
-              } label: {
-                Label(project.branch, systemImage: "arrow.triangle.branch").font(.system(size: 10))
-              }
-              Spacer(minLength: 3)
-              Menu {
-                ForEach(store.models) { m in
-                  Button {
-                    store.modelId = m.id
-                    store.savePreferences()
-                  } label: {
-                    Label(m.name, systemImage: store.modelId == m.id ? "checkmark" : "circle")
+    VStack(spacing: 0) {
+      HStack(spacing: 10) {
+        if let project = store.project {
+          Menu {
+            ForEach(store.projects) { p in Button(p.name) { store.select(p) } }
+          } label: {
+            Label(project.name, systemImage: "chevron.left.forwardslash.chevron.right")
+              .font(.system(size: 13, weight: .semibold))
+          }
+          Menu {
+            ForEach(project.branches, id: \.self) { branch in
+              Button(branch) { store.branch(branch) }
+            }
+          } label: {
+            Label(project.branch, systemImage: "arrow.triangle.branch")
+              .font(.system(size: 11)).foregroundStyle(PocketStyle.muted)
+          }
+        } else {
+          Button("Choose a repository") { store.tab = .projects }.font(
+            .system(size: 13, weight: .semibold))
+        }
+        Spacer(minLength: 2)
+        Button {
+          memory = true
+        } label: {
+          Image(systemName: "brain")
+        }
+        .accessibilityLabel("Project memory").disabled(store.project == nil)
+        Button {
+          store.newConversation = true
+          store.draft = ""
+          composing = true
+        } label: {
+          Image(systemName: "square.and.pencil")
+        }.accessibilityLabel("New conversation")
+      }.foregroundStyle(PocketStyle.ink).padding(.horizontal, 22).padding(.vertical, 16)
+        .background(PocketStyle.paper)
+      ScrollViewReader { proxy in
+        ScrollView {
+          VStack(alignment: .leading, spacing: 24) {
+            if store.currentJob == nil {
+              VStack(spacing: 22) {
+                PocketOrb(size: 56)
+                Text("What can we build?").font(.system(size: 28, weight: .semibold)).tracking(-0.7)
+                  .foregroundStyle(PocketStyle.ink)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                  suggestion("Fix a bug", "ladybug", "Help me fix a bug in this repository: ")
+                  suggestion("Build a feature", "sparkles", "Build a feature in this repository: ")
+                  suggestion(
+                    "Review code", "checkmark.shield",
+                    "Review the relevant code and suggest improvements: ")
+                  suggestion("Add tests", "testtube.2", "Add meaningful tests for: ")
+                }
+              }.padding(.top, 72).padding(.bottom, 32)
+            } else {
+              ForEach(Array(store.projectJobs.reversed())) { job in
+                HStack {
+                  Spacer(minLength: 38)
+                  Text(job.prompt).font(.body).lineSpacing(4).textSelection(.enabled)
+                    .foregroundStyle(PocketStyle.ink).padding(16)
+                    .background(PocketStyle.soft, in: RoundedRectangle(cornerRadius: 19))
+                }
+                VStack(alignment: .leading, spacing: 15) {
+                  HStack(spacing: 8) {
+                    PocketMark().scaleEffect(0.6).frame(width: 17, height: 17).foregroundStyle(
+                      PocketStyle.accent)
+                    Text("Pocket").font(.system(size: 12, weight: .semibold)).foregroundStyle(
+                      PocketStyle.ink)
+                    Text(timeAgo(job.updatedAt)).font(.system(size: 10)).foregroundStyle(
+                      PocketStyle.muted)
+                  }
+                  if let summary = job.report?.summary ?? job.error {
+                    Text(.init(summary)).font(.body).lineSpacing(4).textSelection(.enabled)
+                      .foregroundStyle(PocketStyle.ink.opacity(0.9))
+                  }
+                  if (job.id == store.currentJob?.id || job.status.isActive) && (job.status != .completed || job.report?.files.isEmpty == false) {
+                    JobCard(job: job)
+                  } else if job.report?.files.isEmpty == false {
+                    Button("Review changes") { store.selectJob(job, tab: .changes) }
+                      .font(.system(size: 12, weight: .medium)).foregroundStyle(PocketStyle.accent)
                   }
                 }
-              } label: {
-                HStack(spacing: 4) {
-                  Text(store.models.first { $0.id == store.modelId }?.name ?? "Auto")
-                  Image(systemName: "chevron.down")
-                }.font(.system(size: 10))
               }
-            }.foregroundStyle(PocketStyle.accent).padding(.vertical, 13)
-            Rectangle().fill(PocketStyle.line).frame(height: 1)
-            Button {
-              memory = true
+            }
+            Color.clear.frame(height: 1).id("conversation-end")
+          }.padding(.horizontal, 22).padding(.bottom, 12)
+        }.scrollDismissesKeyboard(.interactively)
+          .onChange(of: store.jobs.count) { _, _ in
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
+              proxy.scrollTo("conversation-end", anchor: .bottom)
+            }
+          }
+      }
+    }
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 15) {
+          TextField("Message Pocket", text: $store.draft, axis: .vertical)
+            .lineLimit(1...6).font(.body).foregroundStyle(PocketStyle.ink)
+            .focused($composing).padding(.top, 2)
+          HStack {
+            Menu {
+              ForEach(store.models) { model in
+                Button {
+                  store.modelId = model.id
+                  store.savePreferences()
+                } label: {
+                  Label(
+                    model.name, systemImage: model.id == store.modelId ? "checkmark" : "sparkles")
+                }
+              }
             } label: {
-              Label("Project memory", systemImage: "square.text.square").font(.system(size: 10))
-            }.foregroundStyle(PocketStyle.muted)
-          }
-          if let job = store.currentJob {
-            HStack {
-              Spacer(minLength: 15)
-              Text(job.prompt).font(.system(size: 12)).lineSpacing(5).padding(17).foregroundStyle(
-                PocketStyle.accent
-              ).background(
-                PocketStyle.soft,
-                in: UnevenRoundedRectangle(
-                  topLeadingRadius: 12, bottomLeadingRadius: 12, bottomTrailingRadius: 3,
-                  topTrailingRadius: 12))
-            }
-            VStack(alignment: .leading, spacing: 13) {
               HStack(spacing: 6) {
-                PocketMark().scaleEffect(0.55).frame(width: 13, height: 15)
-                Text("POCKET").tracking(1.2)
-                Text("· \(timeAgo(job.updatedAt))")
-              }.font(.system(size: 9)).foregroundStyle(PocketStyle.muted)
-              Text(
-                job.report?.summary ?? job.error
-                  ?? "I’ll work through this and bring the changes back for your review."
-              ).font(.system(size: 12)).foregroundStyle(PocketStyle.muted).lineSpacing(5)
-                .textSelection(.enabled)
-              JobCard(job: job)
+                Image(systemName: "sparkles").foregroundStyle(PocketStyle.accent)
+                Text(store.models.first { $0.id == store.modelId }?.name ?? "Choose model")
+                Image(systemName: "chevron.down").font(.system(size: 9))
+              }.font(.system(size: 12, weight: .medium)).foregroundStyle(PocketStyle.ink)
+            }.accessibilityLabel("Choose model").disabled(store.models.isEmpty)
+            Spacer()
+            if store.demoMode {
+              Text("Demo").font(.system(size: 9)).foregroundStyle(PocketStyle.muted)
             }
-          } else {
-            EmptyPocket(
-              symbol: "bubble.left", title: "Your next idea starts here.",
-              detail: "Ask Pocket to fix something, build something, or explore a possibility.")
-          }
-          VStack(alignment: .leading, spacing: 10) {
-            TextField("Ask Pocket to build, fix, or explore…", text: $store.draft, axis: .vertical)
-              .lineLimit(3...8).font(.system(size: 12)).lineSpacing(4).focused($composing)
-            HStack {
-              Label("You’re in control of what ships.", systemImage: "lock.shield").font(
-                .system(size: 8)
-              ).foregroundStyle(PocketStyle.muted)
-              Spacer()
-              Button {
-                composing = false
-                Task { await store.send() }
-              } label: {
+            Button {
+              composing = false
+              Task { await store.send() }
+            } label: {
+              Group {
                 if store.isSending {
                   ProgressView().tint(PocketStyle.paper)
                 } else {
-                  Image(systemName: "arrow.up")
+                  Image(systemName: "arrow.up").font(.system(size: 17, weight: .semibold))
                 }
-              }.buttonStyle(PocketButtonStyle(primary: true)).disabled(
-                store.isSending
-                  || store.draft.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
-                  || store.project == nil || store.models.isEmpty
-              ).accessibilityLabel("Send task")
-            }
-          }.padding(16).background(PocketStyle.card, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(PocketStyle.line)).id("composer")
-          Text(
-            store.demoMode
-              ? "Demo workspace · simulated execution"
-              : "Cloud execution · your computer can stay offline"
-          ).font(.system(size: 9)).foregroundStyle(PocketStyle.muted).frame(maxWidth: .infinity)
-        }.padding(.horizontal, 24).padding(.top, 26).padding(.bottom, 30)
-      }.onChange(of: composing) { _, value in
-        if value { withAnimation { proxy.scrollTo("composer", anchor: .bottom) } }
-      }
-    }.pocketToolbar().sheet(isPresented: $memory) { MemoryView() }
+              }.foregroundStyle(PocketStyle.paper).frame(width: 40, height: 40)
+                .background(PocketStyle.highlight, in: Circle())
+            }.buttonStyle(.plain).disabled(
+              store.isSending || store.project == nil || store.models.isEmpty
+                || store.draft.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
+            )
+            .opacity(
+              store.draft.trimmingCharacters(in: .whitespacesAndNewlines).count < 3 ? 0.4 : 1
+            )
+            .accessibilityLabel("Send task")
+          }
+        }.padding(17).background(PocketStyle.card, in: RoundedRectangle(cornerRadius: 21))
+
+          .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 3)
+      }.background(PocketStyle.paper)
+    }
+    .onChange(of: composing) { _, value in store.isComposing = value }
+    .onDisappear { store.isComposing = false }
+    .pocketToolbar().sheet(isPresented: $memory) { MemoryView() }
+  }
+  private func suggestion(_ title: String, _ symbol: String, _ prompt: String) -> some View {
+    Button {
+      store.draft = prompt
+      composing = true
+    } label: {
+      HStack(spacing: 9) {
+        Image(systemName: symbol).foregroundStyle(PocketStyle.accent)
+        Text(title).foregroundStyle(PocketStyle.ink)
+        Spacer(minLength: 0)
+      }.font(.subheadline).padding(15)
+        .background(PocketStyle.card, in: RoundedRectangle(cornerRadius: 15))
+
+    }.buttonStyle(.plain)
   }
 }
+
 struct JobCard: View {
   @Environment(PocketStore.self) private var store
   let job: AgentJob
@@ -167,7 +227,7 @@ struct JobCard: View {
           Button("Try again") { store.draft = job.prompt }.buttonStyle(PocketButtonStyle())
         }
         if job.demo {
-          Text("Demo result. No repository was modified.").font(.system(size: 9)).foregroundStyle(
+          Text("Demo · simulated result").font(.system(size: 9)).foregroundStyle(
             PocketStyle.muted)
         }
       }
@@ -179,7 +239,7 @@ struct DiffStats: View {
   var body: some View {
     HStack(spacing: 13) {
       Text("\(report.files.count) files changed").foregroundStyle(PocketStyle.ink)
-      Text("+\(report.additions)").foregroundStyle(PocketStyle.accent)
+      Text("+\(report.additions)").foregroundStyle(PocketStyle.success)
       Text("−\(report.deletions)").foregroundStyle(PocketStyle.red)
     }.font(.system(size: 11, weight: .medium))
   }
@@ -192,9 +252,7 @@ struct MemoryView: View {
       ScrollView {
         if let project = store.project {
           VStack(alignment: .leading, spacing: 25) {
-            PageHeading(
-              eyebrow: "Pocket Memory", title: project.name,
-              subtitle: "A little context. A lot less explaining.")
+            PageHeading(title: project.name)
             memorySection("Stack", values: project.memory.stack)
             memorySection("Current objective", values: [project.memory.objective])
             memorySection("Important decisions", values: project.memory.decisions)

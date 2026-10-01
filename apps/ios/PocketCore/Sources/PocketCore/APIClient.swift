@@ -4,24 +4,41 @@ public enum APIError: LocalizedError, Sendable {
   case invalidResponse
   case server(Int, String)
   case insecureEndpoint
+  case unreachable(String)
   public var errorDescription: String? {
     switch self {
     case .invalidResponse: "Pocket returned an unreadable response."
     case .server(_, let message): message
-    case .insecureEndpoint: "Use HTTPS for your Pocket server. HTTP is available only on localhost."
+    case .insecureEndpoint: "Use HTTPS for your Pocket server."
+    case .unreachable:
+      "Connection interrupted. Please try again."
     }
   }
 }
 public struct PocketAPI: Sendable {
   public let baseURL: URL
   private let session: URLSession
-  public init(baseURL: URL, session: URLSession = .shared) throws {
+  public init(baseURL: URL, session: URLSession = .shared, allowDevelopmentNetwork: Bool = false)
+    throws
+  {
     let local = ["localhost", "127.0.0.1", "::1"].contains(baseURL.host)
-    guard baseURL.scheme == "https" || (baseURL.scheme == "http" && local) else {
+    let development = allowDevelopmentNetwork && Self.isDevelopmentHost(baseURL.host ?? "")
+    guard baseURL.scheme == "https" || (baseURL.scheme == "http" && (local || development)) else {
       throw APIError.insecureEndpoint
     }
     self.baseURL = baseURL
     self.session = session
+  }
+  private static func isDevelopmentHost(_ host: String) -> Bool {
+    if host.lowercased().hasSuffix(".local") { return true }
+    let components = host.split(separator: ".", omittingEmptySubsequences: false)
+    guard components.count == 4,
+      components.allSatisfy({ !$0.isEmpty && $0.allSatisfy({ $0.isASCII && $0.isNumber }) })
+    else { return false }
+    let parts = components.compactMap { Int($0) }
+    guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
+    return parts[0] == 10 || (parts[0] == 172 && (16...31).contains(parts[1]))
+      || (parts[0] == 192 && parts[1] == 168)
   }
   public func get<T: Decodable & Sendable>(_ path: String, token: String) async throws -> T {
     try await request(path, token: token, body: nil, idempotencyKey: nil)
@@ -32,19 +49,31 @@ public struct PocketAPI: Sendable {
     try await request(
       path, token: token, body: JSONEncoder().encode(body), idempotencyKey: idempotencyKey)
   }
+  public func delete<T: Decodable & Sendable>(_ path: String, token: String) async throws -> T {
+    try await request(path, token: token, body: nil, idempotencyKey: nil, method: "DELETE")
+  }
   private func request<T: Decodable & Sendable>(
-    _ path: String, token: String, body: Data?, idempotencyKey: String?
+    _ path: String, token: String, body: Data?, idempotencyKey: String?, method: String? = nil
   ) async throws -> T {
     var request = URLRequest(url: baseURL.appendingPathComponent("v1").appendingPathComponent(path))
     request.timeoutInterval = 35
-    request.httpMethod = body == nil ? "GET" : "POST"
+    request.httpMethod = method ?? (body == nil ? "GET" : "POST")
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     if let body {
       request.httpBody = body
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
       request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
     }
-    let (data, response) = try await session.data(for: request)
+    let data: Data
+    let response: URLResponse
+    do {
+      (data, response) = try await session.data(for: request)
+    } catch let error as URLError
+      where [.cannotConnectToHost, .cannotFindHost, .notConnectedToInternet, .timedOut].contains(
+        error.code)
+    {
+      throw APIError.unreachable(baseURL.absoluteString)
+    }
     guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
     guard (200..<300).contains(http.statusCode) else {
       let error = try? JSONDecoder().decode(ErrorBody.self, from: data)

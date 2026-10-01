@@ -137,6 +137,12 @@ export class DaytonaHandle implements SandboxHandle {
   }
   async read(path: string) {
     const target = await this.path(path);
+    const listing = await this.exec(
+      `python3 -I -c ${quote('import os,sys,json; p=sys.argv[1]; print(json.dumps({"directory":True,"entries":[n+("/" if os.path.isdir(os.path.join(p,n)) else "") for n in sorted(os.listdir(p)) if n!=".git"][:100]})) if os.path.isdir(p) else print("FILE")')} ${quote(target)}`,
+      10,
+    );
+    if (listing.exitCode !== 0) throw new Error('Path unavailable; search for an existing file');
+    if (listing.output.trim() !== 'FILE') return listing.output;
     const size = await this.exec(
       `python3 -I -c ${quote('import os,sys; assert os.path.getsize(sys.argv[1])<=100000, "File too large"')} ${quote(target)}`,
       10,

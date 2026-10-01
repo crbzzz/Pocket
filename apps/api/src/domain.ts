@@ -51,6 +51,7 @@ export interface DiffFile {
   patch: string;
 }
 export interface Report {
+  checkpointAvailable?: boolean;
   summary: string;
   files: DiffFile[];
   checks: { name: string; status: 'passed' | 'failed' | 'skipped'; detail: string }[];

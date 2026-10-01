@@ -8,8 +8,20 @@ struct AuthSession: Codable, Sendable {
   let refresh_token: String
   let expires_in: Int
   let provider_token: String?
+  var user: AuthUser?
   var savedAt: Date?
   var expiry: Date { (savedAt ?? Date()).addingTimeInterval(Double(expires_in)) }
+}
+struct AuthUser: Codable, Sendable {
+  let email: String?
+  let user_metadata: Metadata?
+  struct Metadata: Codable, Sendable {
+    let user_name: String?
+    let preferred_username: String?
+  }
+  var displayName: String {
+    user_metadata?.user_name ?? user_metadata?.preferred_username ?? email ?? "GitHub"
+  }
 }
 enum SessionVault {
   static let service = "app.pocket.session"
@@ -44,18 +56,20 @@ enum SessionVault {
 }
 enum AuthFailure: LocalizedError {
   case configuration, callback, keychain, rejected
+  case provider(String)
   var errorDescription: String? {
     switch self {
-    case .configuration: "Configure Supabase URL and publishable key in the app’s build settings."
+    case .configuration: "GitHub sign-in is not configured for this build."
+    case .provider(let message): message
     case .callback: "GitHub sign-in did not return an authorization code."
     case .keychain: "Couldn’t securely save your session."
     case .rejected: "Sign-in failed. Please try again."
     }
   }
 }
-@MainActor
+@MainActor @Observable
 final class PocketAuth: NSObject, ASWebAuthenticationPresentationContextProviding {
-  private var webSession: ASWebAuthenticationSession?
+  @ObservationIgnored private var webSession: ASWebAuthenticationSession?
   var session: AuthSession? = SessionVault.read()
   var supabaseURL: String {
     Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String ?? ""
@@ -96,10 +110,13 @@ final class PocketAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
       if webSession?.start() != true { continuation.resume(throwing: AuthFailure.rejected) }
     }
     defer { webSession = nil }
-    guard
-      let code = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems?.first(
-        where: { $0.name == "code" })?.value
-    else { throw AuthFailure.callback }
+    let parameters = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    if let message = parameters.first(where: { $0.name == "error_description" })?.value {
+      throw AuthFailure.provider(message)
+    }
+    guard let code = parameters.first(where: { $0.name == "code" })?.value else {
+      throw AuthFailure.callback
+    }
     session = try await exchange(
       grant: "pkce", body: ["auth_code": code, "code_verifier": verifier])
     try SessionVault.save(session!)
@@ -112,7 +129,8 @@ final class PocketAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
       session = AuthSession(
         access_token: renewed.access_token, refresh_token: renewed.refresh_token,
         expires_in: renewed.expires_in,
-        provider_token: renewed.provider_token ?? current.provider_token, savedAt: Date())
+        provider_token: renewed.provider_token ?? current.provider_token,
+        user: renewed.user ?? current.user, savedAt: Date())
       try SessionVault.save(session!)
     }
     return session!.access_token
@@ -128,6 +146,15 @@ final class PocketAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
     request.httpBody = try JSONEncoder().encode(body)
     let (data, response) = try await URLSession.shared.data(for: request)
     guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+      struct AuthError: Decodable {
+        let msg: String?
+        let error_description: String?
+      }
+      if let failure = try? JSONDecoder().decode(AuthError.self, from: data),
+        let message = failure.msg ?? failure.error_description
+      {
+        throw AuthFailure.provider(message)
+      }
       throw AuthFailure.rejected
     }
     var result = try JSONDecoder().decode(AuthSession.self, from: data)

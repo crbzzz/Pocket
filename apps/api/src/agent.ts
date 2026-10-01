@@ -7,9 +7,15 @@ import { quote, safePath, type SandboxHandle, type SandboxProvider } from './san
 import type { GitProvider } from './github.js';
 import type { CheckpointStorage } from './artifacts.js';
 export const limits = {
-  steps: 24,
-  runtimeMs: 10 * 60 * 1000,
-  tokens: 60000,
+  get steps() {
+    return process.env.POCKET_AGENT_PROFILE === 'free' ? 6 : 24;
+  },
+  get runtimeMs() {
+    return process.env.POCKET_AGENT_PROFILE === 'free' ? 3 * 60 * 1000 : 10 * 60 * 1000;
+  },
+  get tokens() {
+    return process.env.POCKET_AGENT_PROFILE === 'free' ? 18000 : 60000;
+  },
   outputChars: 16000,
   retries: 1,
   concurrencyPerUser: 2,
@@ -21,7 +27,7 @@ const system = `You are Pocket, a careful software engineer. Follow the user's c
 {"kind":"run","command":"shell command"}
 {"kind":"check","name":"Tests or Build","command":"shell command"}
 {"kind":"finish","summary":"concise summary and limitations"}
-Work within 24 steps. Keep outputs and changes small. Always finish with a summary.`;
+Answer questions and summarize repositories without changing files. For coding requests, write the actual changes with the write action and verify them. Respond in the user's language. Work within 24 steps. Keep outputs and changes small. Always finish with a useful summary.`;
 export interface RuntimeDependencies {
   sandbox: SandboxProvider;
   git: GitProvider;
@@ -44,6 +50,7 @@ export class AgentWorker {
   }
   private async run(lease: Lease, parent?: AbortSignal) {
     const { job, token } = lease;
+    const systemPrompt = system.replace('24 steps', `${limits.steps} steps`);
     const controller = new AbortController();
     let sandbox: SandboxHandle | undefined;
     let cleanup: Promise<void> | undefined;
@@ -154,7 +161,7 @@ export class AgentWorker {
           controller.signal.throwIfAborted();
           // UTF-8 byte count is a conservative reservation; actual provider usage is recorded after each call.
           const inputBound =
-            Buffer.byteLength(system + messages.map((m) => m.content).join('')) + 512;
+            Buffer.byteLength(systemPrompt + messages.map((m) => m.content).join('')) + 512;
           const maxOutput = Math.min(2400, limits.tokens - totalTokens - inputBound);
           if (maxOutput < 256) throw new Error('Maximum LLM token budget reached');
           const reservation =
@@ -164,10 +171,11 @@ export class AgentWorker {
             throw new Error('Task cost limit reached');
           const completion = await llm.complete(
             model,
-            system,
+            systemPrompt,
             messages,
             maxOutput,
             controller.signal,
+            true,
           );
           await this.store.db.query(
             'INSERT INTO usage(job_id,input_tokens,output_tokens,cost_cents) VALUES($1,$2,$3,$4)',
@@ -207,7 +215,13 @@ export class AgentWorker {
             const r = await sandbox.exec(`git grep -n -F -- ${quote(action.query)} | head -80`, 10);
             result = r.output;
           } else if (action.kind === 'read') {
-            result = await sandbox.read(safePath(action.path));
+            const path = safePath(action.path);
+            try {
+              result = await sandbox.read(path);
+            } catch {
+              result =
+                'Read failed: this path is unavailable or too large. Search or list the parent directory, then read a relevant file.';
+            }
           } else if (action.kind === 'write') {
             for (const c of checks) {
               c.status = 'skipped';

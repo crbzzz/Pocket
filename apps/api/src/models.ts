@@ -12,6 +12,54 @@ export const actionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('check'), name: z.string().max(80), command: z.string().max(4000) }),
   z.object({ kind: z.literal('finish'), summary: z.string().max(8000) }),
 ]);
+const toolPrefix = 'pocket_';
+const actionTools = actionSchema.options.map((schema) => {
+  const json = z.toJSONSchema(schema) as {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  const kind = schema.shape.kind.value;
+  const { kind: _kind, ...properties } = json.properties;
+  return {
+    name: toolPrefix + kind,
+    description:
+      kind === 'finish'
+        ? 'Respond to the user with a useful summary in their language. Do not modify files for questions or summaries.'
+        : `Execute the ${kind} operation in the repository.`,
+    input_schema: {
+      type: 'object',
+      properties,
+      required: (json.required ?? []).filter((k) => k !== 'kind'),
+      additionalProperties: false,
+    },
+  };
+});
+function anthropicMessages(messages: Message[]) {
+  let pending: string | undefined;
+  return messages.map((message, index) => {
+    if (message.role === 'assistant') {
+      try {
+        const action = parseAction(message.content);
+        const { kind, ...input } = action;
+        pending = `pocket_action_${index}`;
+        return {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: pending, name: toolPrefix + kind, input }],
+        };
+      } catch {
+        pending = undefined;
+      }
+    } else if (pending) {
+      const id = pending;
+      pending = undefined;
+      return {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: id, content: message.content }],
+      };
+    }
+    return message;
+  });
+}
 export type AgentAction = z.infer<typeof actionSchema>;
 export interface Message {
   role: 'user' | 'assistant';
@@ -35,6 +83,7 @@ export interface LLMProvider {
     messages: Message[],
     maxTokens: number,
     signal: AbortSignal,
+    actionMode?: boolean,
   ): Promise<Completion>;
 }
 const configs = z.array(
@@ -112,6 +161,7 @@ export class HTTPModels implements LLMProvider {
     messages: Message[],
     maxTokens: number,
     signal: AbortSignal,
+    actionMode = false,
   ): Promise<Completion> {
     const key = process.env[envKeys[model.provider]];
     if (!key) throw new Error('Model credentials are not configured');
@@ -130,7 +180,15 @@ export class HTTPModels implements LLMProvider {
       url = 'https://api.anthropic.com/v1/messages';
       headers['x-api-key'] = key;
       headers['anthropic-version'] = '2023-06-01';
-      body = { model: model.model, system, messages, max_tokens: maxTokens };
+      body = {
+        model: model.model,
+        system,
+        messages: actionMode ? anthropicMessages(messages) : messages,
+        max_tokens: maxTokens,
+        ...(actionMode
+          ? { tools: actionTools, tool_choice: { type: 'any', disable_parallel_tool_use: true } }
+          : {}),
+      };
     } else {
       url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.model)}:generateContent`;
       headers['x-goog-api-key'] = key;
@@ -166,16 +224,23 @@ export class HTTPModels implements LLMProvider {
         inputTokens: d.usage?.prompt_tokens ?? inputFallback,
         outputTokens: d.usage?.completion_tokens ?? maxTokens,
       });
-    if (model.provider === 'anthropic')
+    if (model.provider === 'anthropic') {
+      const action = actionMode
+        ? d.content?.find(
+            (p: any) => p.type === 'tool_use' && actionTools.some((t) => t.name === p.name),
+          )
+        : undefined;
       return normalize({
-        text:
-          d.content
-            ?.filter((p: any) => p.type === 'text')
-            .map((p: any) => p.text)
-            .join('') ?? '',
+        text: action
+          ? JSON.stringify({ ...action.input, kind: action.name.slice(toolPrefix.length) })
+          : (d.content
+              ?.filter((p: any) => p.type === 'text')
+              .map((p: any) => p.text)
+              .join('') ?? ''),
         inputTokens: d.usage?.input_tokens ?? inputFallback,
         outputTokens: d.usage?.output_tokens ?? maxTokens,
       });
+    }
     return normalize({
       text: d.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? '').join('') ?? '',
       inputTokens: d.usageMetadata?.promptTokenCount ?? inputFallback,
@@ -189,6 +254,7 @@ export function parseAction(text: string): AgentAction {
   return actionSchema.parse(
     JSON.parse(
       text
+        .trim()
         .replace(/^```(?:json)?\s*/, '')
         .replace(/\s*```$/, '')
         .trim(),

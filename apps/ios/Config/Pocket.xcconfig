@@ -1,0 +1,6 @@
+// Public client configuration only. Never add server credentials here.
+POCKET_SUPABASE_URL =
+POCKET_SUPABASE_PUBLISHABLE_KEY =
+POCKET_API_URL = http:/$()/127.0.0.1:4310
+POCKET_BACKEND_MODE = demo
+#include? "Local.xcconfig"

@@ -14,7 +14,7 @@ public struct Project: Codable, Identifiable, Sendable, Equatable {
   public let language: String
   public let color: String
   public var branch: String
-  public let branches: [String]
+  public var branches: [String]
   public let memory: ProjectMemory
   public let updatedAt: String
 }
@@ -80,7 +80,8 @@ public struct AgentReport: Codable, Sendable {
   public let costCents: Int
   public var additions: Int { files.reduce(0) { $0 + $1.additions } }
   public var deletions: Int { files.reduce(0) { $0 + $1.deletions } }
-  public var canShip: Bool { !checks.contains { $0.status == "failed" } }
+  public let checkpointAvailable: Bool?
+  public var canShip: Bool { checkpointAvailable != false && !files.isEmpty && !checks.contains { $0.status == "failed" } }
 }
 public struct AgentJob: Codable, Identifiable, Sendable {
   public let id: String
@@ -97,6 +98,8 @@ public struct AgentJob: Codable, Identifiable, Sendable {
   public let demo: Bool
 }
 public struct PocketSave: Codable, Identifiable, Sendable {
+  public let branch: String?
+  public let canDelete: Bool?
   public let id: String
   public let projectId: String
   public let jobId: String

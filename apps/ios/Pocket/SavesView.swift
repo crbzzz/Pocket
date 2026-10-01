@@ -4,59 +4,47 @@ import SwiftUI
 struct SavesView: View {
   @Environment(PocketStore.self) private var store
   @State private var restore: PocketSave?
+  @State private var deletion: PocketSave?
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
-        PageHeading(
-          eyebrow: "A little peace of mind.", title: "Room to experiment.",
-          subtitle: "Every finished task is a Save. Come back to it whenever you like.")
-        ForEach(store.saves) { save in
-          Card {
-            HStack(spacing: 14) {
-              Text("#\(save.number)").font(.system(size: 25, design: .serif)).foregroundStyle(
-                PocketStyle.muted)
-              VStack(alignment: .leading, spacing: 8) {
-                Text(save.title).font(.system(size: 12, weight: .medium)).foregroundStyle(
-                  PocketStyle.ink)
-                Text(timeAgo(save.createdAt)).font(.system(size: 10)).foregroundStyle(
-                  PocketStyle.muted)
+    List {
+      if let project = store.project {
+        Section {
+          ForEach(store.saves) { save in
+            VStack(alignment: .leading, spacing: 9) {
+              HStack {
+                Label("Checkpoint #\(save.number)", systemImage: "square.stack.3d.up")
+                  .font(.subheadline.weight(.semibold))
+                Spacer()
+                Menu {
+                  Button("Use as starting point", systemImage: "arrow.counterclockwise") { restore = save }
+                  Button("Delete checkpoint", systemImage: "trash", role: .destructive) { deletion = save }.disabled(save.canDelete == false)
+                } label: { Image(systemName: "ellipsis").padding(8) }
+                  .accessibilityLabel("Checkpoint actions")
               }
-              Spacer(minLength: 0)
-              Button("Restore") { restore = save }.buttonStyle(PocketButtonStyle())
-            }
+              Text(save.title).font(.body).lineLimit(3)
+              Text("\(save.branch ?? project.branch) · \(timeAgo(save.createdAt))")
+                .font(.caption).foregroundStyle(PocketStyle.muted)
+            }.padding(.vertical, 6)
+              .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if save.canDelete != false { Button("Delete", systemImage: "trash", role: .destructive) { deletion = save } }
+              }
           }
-        }
-        if store.saves.isEmpty {
-          EmptyPocket(
-            symbol: "square.stack", title: "A safety net for your ideas.",
-            detail: "Your first finished task creates your first Save.")
-        }
-        Card {
-          VStack(alignment: .leading, spacing: 10) {
-            Label("Try the ‘what if.’", systemImage: "lock.shield").font(
-              .system(size: 18, design: .serif)
-            ).foregroundStyle(PocketStyle.accent)
-            Text(
-              "A restore selects the starting point for your next task. Your existing Saves and remote branch stay intact."
-            ).font(.system(size: 11)).foregroundStyle(PocketStyle.muted).lineSpacing(4)
-          }
-        }
-      }.padding(.horizontal, 24).padding(.top, 26).padding(.bottom, 30)
-    }.pocketToolbar().task { await store.loadSaves() }.refreshable { await store.loadSaves() }
-      .confirmationDialog(
-        "Restore Save #\(restore?.number ?? 0)?",
-        isPresented: Binding(get: { restore != nil }, set: { if !$0 { restore = nil } }),
-        titleVisibility: .visible
-      ) {
-        if let save = restore {
-          Button("Restore as starting point") {
-            Task { await store.restore(save) }
-            restore = nil
-          }
-        }
-        Button("Cancel", role: .cancel) { restore = nil }
-      } message: {
-        Text("Your next task will start from this Git checkpoint. Nothing is force-pushed.")
+        } header: { Text(project.name) }
       }
+    }.listStyle(.plain).scrollContentBackground(.hidden)
+      .overlay {
+        if store.saves.isEmpty { ContentUnavailableView("No checkpoints", systemImage: "square.stack.3d.up", description: Text("Completed tasks save a starting point for your next changes.")) }
+      }
+      .pocketToolbar().task { await store.loadSaves() }.refreshable { await store.loadSaves() }
+      .confirmationDialog("Restore checkpoint #\(restore?.number ?? 0)?", isPresented: Binding(get: { restore != nil }, set: { if !$0 { restore = nil } }), titleVisibility: .visible) {
+        if let save = restore {
+          Button("Use as starting point") { restore = nil; Task { await store.restore(save) } }
+        }
+      } message: { Text("Your next task will start from this checkpoint.") }
+      .confirmationDialog("Delete this checkpoint?", isPresented: Binding(get: { deletion != nil }, set: { if !$0 { deletion = nil } }), titleVisibility: .visible) {
+        if let save = deletion {
+          Button("Delete checkpoint", role: .destructive) { deletion = nil; Task { await store.deleteCheckpoint(save) } }
+        }
+      } message: { Text("This saved version will be permanently removed. Your GitHub repository is unchanged.") }
   }
 }

@@ -7,7 +7,9 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc --noEmit",
     "start": "tsx src/main.ts",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "dev:demo": "POCKET_MODE=demo tsx watch src/main.ts",
+    "dev:iphone": "POCKET_MODE=demo POCKET_DEMO_LAN=true tsx watch src/main.ts"
   },
   "dependencies": {
     "@daytona/sdk": "^0.220.0",

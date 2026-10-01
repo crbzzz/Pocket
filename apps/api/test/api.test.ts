@@ -192,6 +192,42 @@ test('filesystem paths and model actions are validated', () => {
   assert.throws(() => parseAction('{"kind":"push"}'));
 });
 
+test('activity deletion preserves checkpoints, checkpoint deletion clears restore and publish references', async () => {
+  const store = new Store(db);
+  const job = await store.create(demoUser, payload, randomUUID(), true);
+  assert.equal(
+    (await server.app.inject({ method: 'DELETE', url: `/v1/jobs/${job.id}`, headers })).statusCode,
+    409,
+  );
+  await new AgentWorker(store, true).runOne();
+  const save = (await store.saves(demoUser, demoProject)).find((s) => s.jobId === job.id)!;
+  assert.ok(save);
+  await assert.rejects(() => store.deleteSave(randomUUID(), demoProject, save.id));
+  const deletion = await server.app.inject({
+    method: 'DELETE',
+    url: `/v1/jobs/${job.id}`,
+    headers,
+  });
+  assert.equal(deletion.statusCode, 200, deletion.body);
+  assert.ok(!(await store.jobs(demoUser)).some((j) => j.id === job.id));
+  assert.ok((await store.jobs(demoUser, true)).some((j) => j.id === job.id));
+  assert.ok((await store.saves(demoUser, demoProject)).some((s) => s.id === save.id));
+  const removed = await server.app.inject({
+    method: 'DELETE',
+    url: `/v1/projects/${demoProject}/saves/${save.id}`,
+    headers,
+  });
+  assert.equal(removed.statusCode, 200, removed.body);
+  assert.ok(!(await store.saves(demoUser, demoProject)).some((s) => s.id === save.id));
+  await assert.rejects(() => store.restore(demoUser, demoProject, save.id));
+  assert.equal((await store.job(demoUser, job.id)).report?.checkpointAvailable, false);
+  assert.ok(
+    !Object.values((await store.project(demoUser, demoProject)).branchSaves ?? {}).includes(
+      save.snapshotRef,
+    ),
+  );
+});
+
 test('signed webhook revokes access, cancels work and rejects malformed signatures', async () => {
   process.env.GITHUB_WEBHOOK_SECRET = 'test-webhook-secret';
   await db.query('UPDATE projects SET data=data || \'{"installationId":123}\'::jsonb WHERE id=$1', [

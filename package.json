@@ -12,13 +12,18 @@
     "check": "npm run build && npm test",
     "test:preview": "playwright test",
     "format": "prettier --write apps/api apps/preview tests playwright.config.ts docs README.md infra/dispatcher/worker.js",
-    "format:check": "prettier --check apps/api apps/preview tests playwright.config.ts docs README.md infra/dispatcher/worker.js"
+    "format:check": "prettier --check apps/api apps/preview tests playwright.config.ts docs README.md infra/dispatcher/worker.js",
+    "dev:demo": "npm run dev:demo -w @pocket/api",
+    "dev:iphone": "npm run dev:iphone -w @pocket/api",
+    "configure:ios": "node scripts/configure-ios.mjs",
+    "deploy:cloudflare": "node scripts/deploy-cloudflare.mjs"
   },
   "engines": {
     "node": ">=22.12"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "prettier": "^3.9.9"
+    "prettier": "^3.9.9",
+    "wrangler": "^4.145.0"
   }
 }

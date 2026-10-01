@@ -1,48 +1,296 @@
 // !$*UTF8*$!
-{ archiveVersion = 1; classes = {}; objectVersion = 60; objects = {
-E1800DF57335659192E326E7 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsView.swift; sourceTree = "<group>"; };
-E87AC673EEA40C3F40F92803 = { isa = PBXBuildFile; fileRef = E1800DF57335659192E326E7; };
-A82BCA2D9D9852AAF82FA8D5 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Authentication.swift; sourceTree = "<group>"; };
-24DF3286CCD0626638EB6F0C = { isa = PBXBuildFile; fileRef = A82BCA2D9D9852AAF82FA8D5; };
-8B2DCE8A4441A7E101EDE119 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangesView.swift; sourceTree = "<group>"; };
-C3D9C57688E694BA4EE41BA7 = { isa = PBXBuildFile; fileRef = 8B2DCE8A4441A7E101EDE119; };
-1DF6C62AEDD71DB776AC847D = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
-6F85CB2C03F6931DA8B92F7A = { isa = PBXBuildFile; fileRef = 1DF6C62AEDD71DB776AC847D; };
-9BDEE954C10CC1C7597EA558 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketApp.swift; sourceTree = "<group>"; };
-1767DDF39B8CDF6342F9906F = { isa = PBXBuildFile; fileRef = 9BDEE954C10CC1C7597EA558; };
-7657A93EB382DC8C0BB1542E = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketStore.swift; sourceTree = "<group>"; };
-8217A90F5D8629E1B434BA05 = { isa = PBXBuildFile; fileRef = 7657A93EB382DC8C0BB1542E; };
-E3426F4A4BE7CA6773068F9E = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
-BF385CA7FE5356D84446C663 = { isa = PBXBuildFile; fileRef = E3426F4A4BE7CA6773068F9E; };
-59231150F66BC450CF09AB45 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Realtime.swift; sourceTree = "<group>"; };
-E26114A13FE9CEB32B989B51 = { isa = PBXBuildFile; fileRef = 59231150F66BC450CF09AB45; };
-ACDD57C210C7859BF5986A8C = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
-95220384773AAE5B229AA82A = { isa = PBXBuildFile; fileRef = ACDD57C210C7859BF5986A8C; };
-F0AB04A3BD2E3CE954A809C5 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavesView.swift; sourceTree = "<group>"; };
-5DA75C61A22D61AC9D077D10 = { isa = PBXBuildFile; fileRef = F0AB04A3BD2E3CE954A809C5; };
-EEDE96C56CBAC202420A47BC = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-C77878C85CD0B2D47C204512 = { isa = PBXBuildFile; fileRef = EEDE96C56CBAC202420A47BC; };
-CCF9D06818E4C68DC19D0F75 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Style.swift; sourceTree = "<group>"; };
-723B953D193C56C5EB3BF582 = { isa = PBXBuildFile; fileRef = CCF9D06818E4C68DC19D0F75; };
-3685E330EC5277A9DD5661C6 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-716E9590E60B3AFA6E62BF18 = { isa = PBXBuildFile; fileRef = 3685E330EC5277A9DD5661C6; };
-59BD0A3FF43B32849B319E64 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-7D1043473D55BFA90E8530D3 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = Pocket.app; sourceTree = BUILT_PRODUCTS_DIR; };
-D9F82689E8F760ECED47CA3E = { isa = PBXBuildFile; productRef = 8D6A224FA1D1DD751157EB0C; };
-8D6A224FA1D1DD751157EB0C = { isa = XCSwiftPackageProductDependency; package = B747EAD6A8D7189EE159E1E4; productName = PocketCore; };
-B747EAD6A8D7189EE159E1E4 = { isa = XCLocalSwiftPackageReference; relativePath = PocketCore; };
-64292B1C2B2E13EAD8788FC8 = { isa = PBXGroup; children = (8309DD304D804F9D7F6302F5,615B463D1028E4E24B674CF7); sourceTree = "<group>"; };
-8309DD304D804F9D7F6302F5 = { isa = PBXGroup; children = (E1800DF57335659192E326E7,A82BCA2D9D9852AAF82FA8D5,8B2DCE8A4441A7E101EDE119,1DF6C62AEDD71DB776AC847D,9BDEE954C10CC1C7597EA558,7657A93EB382DC8C0BB1542E,E3426F4A4BE7CA6773068F9E,59231150F66BC450CF09AB45,ACDD57C210C7859BF5986A8C,F0AB04A3BD2E3CE954A809C5,EEDE96C56CBAC202420A47BC,CCF9D06818E4C68DC19D0F75,59BD0A3FF43B32849B319E64,3685E330EC5277A9DD5661C6); path = Pocket; sourceTree = "<group>"; };
-615B463D1028E4E24B674CF7 = { isa = PBXGroup; children = (7D1043473D55BFA90E8530D3); name = Products; sourceTree = "<group>"; };
-BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (E87AC673EEA40C3F40F92803,24DF3286CCD0626638EB6F0C,C3D9C57688E694BA4EE41BA7,6F85CB2C03F6931DA8B92F7A,1767DDF39B8CDF6342F9906F,8217A90F5D8629E1B434BA05,BF385CA7FE5356D84446C663,E26114A13FE9CEB32B989B51,95220384773AAE5B229AA82A,5DA75C61A22D61AC9D077D10,C77878C85CD0B2D47C204512,723B953D193C56C5EB3BF582); runOnlyForDeploymentPostprocessing = 0; };
-7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (D9F82689E8F760ECED47CA3E); runOnlyForDeploymentPostprocessing = 0; };
-0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (716E9590E60B3AFA6E62BF18); runOnlyForDeploymentPostprocessing = 0; };
-0E8A3AD980EC179856012B7E = { isa = PBXNativeTarget; buildConfigurationList = EAD1C478648BB5F4F725A516; buildPhases = (BCE16DD0260827ECF338C787,7561BFB015D8F536760CB671,0189424A5A60FED329FA868E); buildRules = (); dependencies = (); name = Pocket; packageProductDependencies = (8D6A224FA1D1DD751157EB0C); productName = Pocket; productReference = 7D1043473D55BFA90E8530D3; productType = "com.apple.product-type.application"; };
-98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2700; }; buildConfigurationList = 96316AF13F45443E4E9C4BA0; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base); mainGroup = 64292B1C2B2E13EAD8788FC8; packageReferences = (B747EAD6A8D7189EE159E1E4); productRefGroup = 615B463D1028E4E24B674CF7; projectDirPath = ""; projectRoot = ""; targets = (0E8A3AD980EC179856012B7E); };
-EAD1C478648BB5F4F725A516 = { isa = XCConfigurationList; buildConfigurations = (4D8F54E7CBAF670D9F6C230D,1A6EFC2CD0AF63DD14BE0438); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-4D8F54E7CBAF670D9F6C230D = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; ALWAYS_SEARCH_USER_PATHS = NO; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; PRODUCT_BUNDLE_IDENTIFIER = app.pocket.ios; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = Pocket/Info.plist; TARGETED_DEVICE_FAMILY = 1; CODE_SIGN_STYLE = Automatic; SUPABASE_URL = ""; SUPABASE_PUBLISHABLE_KEY = ""; ENABLE_PREVIEWS = YES; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = dwarf; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; name = Debug; };
-1A6EFC2CD0AF63DD14BE0438 = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; ALWAYS_SEARCH_USER_PATHS = NO; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; PRODUCT_BUNDLE_IDENTIFIER = app.pocket.ios; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = Pocket/Info.plist; TARGETED_DEVICE_FAMILY = 1; CODE_SIGN_STYLE = Automatic; SUPABASE_URL = ""; SUPABASE_PUBLISHABLE_KEY = ""; ENABLE_PREVIEWS = YES; SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; }; name = Release; };
-96316AF13F45443E4E9C4BA0 = { isa = XCConfigurationList; buildConfigurations = (ED8772ADEC3A6C25161BC957,00F209874A1F7309F6DCEAA7); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-ED8772ADEC3A6C25161BC957 = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; ALWAYS_SEARCH_USER_PATHS = NO; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = dwarf; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; name = Debug; };
-00F209874A1F7309F6DCEAA7 = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; ALWAYS_SEARCH_USER_PATHS = NO; SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; }; name = Release; };
-}; rootObject = 98F54143AB4E86B28C3AFEE0; }
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+0652E436F42D75F5672A8BD9 = { isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Pocket.xcconfig; sourceTree = SOURCE_ROOT; };
+
+/* Begin PBXBuildFile section */
+		1767DDF39B8CDF6342F9906F /* PocketApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDEE954C10CC1C7597EA558 /* PocketApp.swift */; };
+		24DF3286CCD0626638EB6F0C /* Authentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = A82BCA2D9D9852AAF82FA8D5 /* Authentication.swift */; };
+		5DA75C61A22D61AC9D077D10 /* SavesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0AB04A3BD2E3CE954A809C5 /* SavesView.swift */; };
+		6F85CB2C03F6931DA8B92F7A /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DF6C62AEDD71DB776AC847D /* ChatView.swift */; };
+		716E9590E60B3AFA6E62BF18 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3685E330EC5277A9DD5661C6 /* Assets.xcassets */; };
+		723B953D193C56C5EB3BF582 /* Style.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCF9D06818E4C68DC19D0F75 /* Style.swift */; };
+		8217A90F5D8629E1B434BA05 /* PocketStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7657A93EB382DC8C0BB1542E /* PocketStore.swift */; };
+		95220384773AAE5B229AA82A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACDD57C210C7859BF5986A8C /* RootView.swift */; };
+		BF385CA7FE5356D84446C663 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3426F4A4BE7CA6773068F9E /* ProjectsView.swift */; };
+		C3D9C57688E694BA4EE41BA7 /* ChangesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2DCE8A4441A7E101EDE119 /* ChangesView.swift */; };
+		C77878C85CD0B2D47C204512 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEDE96C56CBAC202420A47BC /* SettingsView.swift */; };
+		D9F82689E8F760ECED47CA3E /* PocketCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8D6A224FA1D1DD751157EB0C /* PocketCore */; };
+		E26114A13FE9CEB32B989B51 /* Realtime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59231150F66BC450CF09AB45 /* Realtime.swift */; };
+		E87AC673EEA40C3F40F92803 /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1800DF57335659192E326E7 /* AgentsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1DF6C62AEDD71DB776AC847D /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		3685E330EC5277A9DD5661C6 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		59231150F66BC450CF09AB45 /* Realtime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Realtime.swift; sourceTree = "<group>"; };
+		59BD0A3FF43B32849B319E64 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		7657A93EB382DC8C0BB1542E /* PocketStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketStore.swift; sourceTree = "<group>"; };
+		7D1043473D55BFA90E8530D3 /* Pocket.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Pocket.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B2DCE8A4441A7E101EDE119 /* ChangesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangesView.swift; sourceTree = "<group>"; };
+		9BDEE954C10CC1C7597EA558 /* PocketApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketApp.swift; sourceTree = "<group>"; };
+		A82BCA2D9D9852AAF82FA8D5 /* Authentication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Authentication.swift; sourceTree = "<group>"; };
+		ACDD57C210C7859BF5986A8C /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		CCF9D06818E4C68DC19D0F75 /* Style.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Style.swift; sourceTree = "<group>"; };
+		E1800DF57335659192E326E7 /* AgentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsView.swift; sourceTree = "<group>"; };
+		E3426F4A4BE7CA6773068F9E /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
+		EEDE96C56CBAC202420A47BC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		F0AB04A3BD2E3CE954A809C5 /* SavesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavesView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7561BFB015D8F536760CB671 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D9F82689E8F760ECED47CA3E /* PocketCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		615B463D1028E4E24B674CF7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7D1043473D55BFA90E8530D3 /* Pocket.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		64292B1C2B2E13EAD8788FC8 = {
+			isa = PBXGroup;
+			children = (
+				8309DD304D804F9D7F6302F5 /* Pocket */,
+				615B463D1028E4E24B674CF7 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8309DD304D804F9D7F6302F5 /* Pocket */ = {
+			isa = PBXGroup;
+			children = (
+				E1800DF57335659192E326E7 /* AgentsView.swift */,
+				A82BCA2D9D9852AAF82FA8D5 /* Authentication.swift */,
+				8B2DCE8A4441A7E101EDE119 /* ChangesView.swift */,
+				1DF6C62AEDD71DB776AC847D /* ChatView.swift */,
+				9BDEE954C10CC1C7597EA558 /* PocketApp.swift */,
+				7657A93EB382DC8C0BB1542E /* PocketStore.swift */,
+				E3426F4A4BE7CA6773068F9E /* ProjectsView.swift */,
+				59231150F66BC450CF09AB45 /* Realtime.swift */,
+				ACDD57C210C7859BF5986A8C /* RootView.swift */,
+				F0AB04A3BD2E3CE954A809C5 /* SavesView.swift */,
+				EEDE96C56CBAC202420A47BC /* SettingsView.swift */,
+				CCF9D06818E4C68DC19D0F75 /* Style.swift */,
+				59BD0A3FF43B32849B319E64 /* Info.plist */,
+				3685E330EC5277A9DD5661C6 /* Assets.xcassets */,
+			);
+			path = Pocket;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0E8A3AD980EC179856012B7E /* Pocket */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EAD1C478648BB5F4F725A516 /* Build configuration list for PBXNativeTarget "Pocket" */;
+			buildPhases = (
+				BCE16DD0260827ECF338C787 /* Sources */,
+				7561BFB015D8F536760CB671 /* Frameworks */,
+				0189424A5A60FED329FA868E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Pocket;
+			packageProductDependencies = (
+				8D6A224FA1D1DD751157EB0C /* PocketCore */,
+			);
+			productName = Pocket;
+			productReference = 7D1043473D55BFA90E8530D3 /* Pocket.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		98F54143AB4E86B28C3AFEE0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2700;
+			};
+			buildConfigurationList = 96316AF13F45443E4E9C4BA0 /* Build configuration list for PBXProject "Pocket" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 64292B1C2B2E13EAD8788FC8;
+			packageReferences = (
+				B747EAD6A8D7189EE159E1E4 /* XCLocalSwiftPackageReference "PocketCore" */,
+			);
+			productRefGroup = 615B463D1028E4E24B674CF7 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0E8A3AD980EC179856012B7E /* Pocket */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0189424A5A60FED329FA868E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				716E9590E60B3AFA6E62BF18 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BCE16DD0260827ECF338C787 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E87AC673EEA40C3F40F92803 /* AgentsView.swift in Sources */,
+				24DF3286CCD0626638EB6F0C /* Authentication.swift in Sources */,
+				C3D9C57688E694BA4EE41BA7 /* ChangesView.swift in Sources */,
+				6F85CB2C03F6931DA8B92F7A /* ChatView.swift in Sources */,
+				1767DDF39B8CDF6342F9906F /* PocketApp.swift in Sources */,
+				8217A90F5D8629E1B434BA05 /* PocketStore.swift in Sources */,
+				BF385CA7FE5356D84446C663 /* ProjectsView.swift in Sources */,
+				E26114A13FE9CEB32B989B51 /* Realtime.swift in Sources */,
+				95220384773AAE5B229AA82A /* RootView.swift in Sources */,
+				5DA75C61A22D61AC9D077D10 /* SavesView.swift in Sources */,
+				C77878C85CD0B2D47C204512 /* SettingsView.swift in Sources */,
+				723B953D193C56C5EB3BF582 /* Style.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		00F209874A1F7309F6DCEAA7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		1A6EFC2CD0AF63DD14BE0438 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0652E436F42D75F5672A8BD9;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = Z5WJ68MYH6;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Pocket/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.edouardbaudouin.pocket.z5wj68myh6;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPABASE_PUBLISHABLE_KEY = "$(POCKET_SUPABASE_PUBLISHABLE_KEY)";
+				SUPABASE_URL = "$(POCKET_SUPABASE_URL)";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		4D8F54E7CBAF670D9F6C230D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0652E436F42D75F5672A8BD9;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = Z5WJ68MYH6;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Pocket/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.edouardbaudouin.pocket.z5wj68myh6;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPABASE_PUBLISHABLE_KEY = "$(POCKET_SUPABASE_PUBLISHABLE_KEY)";
+				SUPABASE_URL = "$(POCKET_SUPABASE_URL)";
+
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		ED8772ADEC3A6C25161BC957 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		96316AF13F45443E4E9C4BA0 /* Build configuration list for PBXProject "Pocket" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ED8772ADEC3A6C25161BC957 /* Debug */,
+				00F209874A1F7309F6DCEAA7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EAD1C478648BB5F4F725A516 /* Build configuration list for PBXNativeTarget "Pocket" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D8F54E7CBAF670D9F6C230D /* Debug */,
+				1A6EFC2CD0AF63DD14BE0438 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		B747EAD6A8D7189EE159E1E4 /* XCLocalSwiftPackageReference "PocketCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = PocketCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8D6A224FA1D1DD751157EB0C /* PocketCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B747EAD6A8D7189EE159E1E4 /* XCLocalSwiftPackageReference "PocketCore" */;
+			productName = PocketCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+}

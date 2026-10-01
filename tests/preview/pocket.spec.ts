@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
 test('delegate, review, restore and approve a demo PR', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Good things start here.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Chat', exact: true })).toBeVisible();
+  await page.locator('#desktop-nav').getByRole('button', { name: 'Repos', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible();
   await page.screenshot({ path: 'docs/images/projects-desktop.png', fullPage: true });
   await page.getByRole('link').filter({ hasText: 'Butterfly' }).click();
-  await expect(page.getByRole('heading', { name: 'What’s on your mind?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Chat' })).toBeVisible();
   await page
     .getByLabel('Task for Pocket')
     .fill('Make the dashboard responsive. Keep the backend unchanged.');
@@ -28,16 +30,18 @@ test('delegate, review, restore and approve a demo PR', async ({ page }) => {
 test('mobile navigation, model selection and project search', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Good things start here.' })).toBeVisible();
+  await expect(page.getByLabel('Model', { exact: true })).toBeVisible();
+  await page.locator('#mobile-nav').getByRole('button', { name: 'Repos', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: 'docs/images/projects-mobile.png', fullPage: true });
   await page.getByLabel('Search projects').fill('Atlas');
   await expect(page.getByRole('heading', { name: 'Atlas', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Butterfly', exact: true })).toHaveCount(0);
-  await page.locator('#mobile-nav').getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByLabel('Default model').selectOption('fast');
   await page.locator('#mobile-nav').getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(page.getByLabel('Model', { exact: true })).toHaveValue('fast');
-  await page.locator('#mobile-nav').getByRole('button', { name: 'Agents', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'A little work in motion.' })).toBeVisible();
+  await page.locator('#mobile-nav').getByRole('button', { name: 'Activity', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible();
 });

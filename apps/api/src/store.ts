@@ -44,14 +44,14 @@ export class Store implements JobQueue {
     if (!rows[0]) throw new DomainError(404, 'Agent not found');
     return rows[0].data as unknown as Job;
   }
-  async jobs(user: string): Promise<Job[]> {
+  async jobs(user: string, includeArchived = false): Promise<Job[]> {
     return (
       await this.db.query(
         `SELECT CASE WHEN j.data->'report' IS NOT NULL AND j.data->'report'<>'null'::jsonb
           THEN jsonb_set(j.data,'{report,files}',coalesce((SELECT jsonb_agg(f || '{"patch":""}'::jsonb) FROM jsonb_array_elements(j.data#>'{report,files}') f),'[]'::jsonb))
           ELSE j.data END AS data
-          FROM jobs j JOIN memberships m ON j.project_id=m.project_id WHERE j.user_id=$1 AND m.user_id=$1 ORDER BY j.created_at DESC LIMIT 100`,
-        [user],
+          FROM jobs j JOIN memberships m ON j.project_id=m.project_id WHERE j.user_id=$1 AND m.user_id=$1 AND ($2 OR coalesce(j.data->>'archived','false')<>'true') ORDER BY j.created_at DESC LIMIT 100`,
+        [user, includeArchived],
       )
     ).rows.map((r) => r.data as unknown as Job);
   }
@@ -67,6 +67,7 @@ export class Store implements JobQueue {
     return this.db.transaction(async (db) => {
       // Lock the user's row to serialize submissions across API instances.
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [user]);
+      await db.query('SELECT id FROM projects WHERE id=$1 FOR UPDATE', [input.projectId]);
       const existing = (
         await db.query('SELECT data FROM jobs WHERE user_id=$1 AND idempotency_key=$2', [user, key])
       ).rows[0];
@@ -266,12 +267,61 @@ export class Store implements JobQueue {
       createdAt: new Date(r.created_at as string).toISOString(),
     }));
   }
+  async deleteJob(user: string, id: string) {
+    await this.job(user, id);
+    const result = await this.db.query(
+      "UPDATE jobs SET data=jsonb_set(data,'{archived}','true') WHERE id=$1 AND user_id=$2 AND status IN ('completed','failed','cancelled') RETURNING id",
+      [id, user],
+    );
+    if (!result.rows.length)
+      throw new DomainError(409, 'Cancel the running task before deleting it');
+    return { deleted: true };
+  }
+  async deleteSave(user: string, projectId: string, id: string): Promise<string> {
+    await this.project(user, projectId);
+    return this.db.transaction(async (db) => {
+      const row = (
+        await db.query(
+          'SELECT s.data FROM saves s JOIN jobs j ON j.id=s.job_id WHERE s.id=$1 AND s.project_id=$2 AND j.user_id=$3 FOR UPDATE OF j',
+          [id, projectId, user],
+        )
+      ).rows[0];
+      if (!row) throw new DomainError(404, 'Checkpoint not found');
+      const save = row.data as unknown as Save;
+      await db.query('SELECT id FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
+      const busy = (
+        await db.query(
+          "SELECT id FROM jobs WHERE project_id=$1 AND status NOT IN ('completed','failed','cancelled') UNION ALL SELECT id FROM actions WHERE job_id=$2 AND status='pending'",
+          [projectId, save.jobId],
+        )
+      ).rows;
+      if (busy.length)
+        throw new DomainError(
+          409,
+          'Wait for running tasks and publishing to finish before deleting this checkpoint',
+        );
+      await db.query('UPDATE saves SET data=data || \'{"deleted":true}\'::jsonb WHERE id=$1', [id]);
+      await db.query(
+        "UPDATE jobs SET data=jsonb_set(data,'{report,checkpointAvailable}','false') WHERE id=$1",
+        [save.jobId],
+      );
+      const p = (await db.query('SELECT data FROM projects WHERE id=$1', [projectId])).rows[0]!
+        .data as unknown as Project;
+      if ((p as Project & { restoreRef?: string }).restoreRef === save.snapshotRef)
+        delete (p as Project & { restoreRef?: string }).restoreRef;
+      p.branchSaves = Object.fromEntries(
+        Object.entries(p.branchSaves ?? {}).filter(([, ref]) => ref !== save.snapshotRef),
+      );
+      await db.query('UPDATE projects SET data=$2 WHERE id=$1', [projectId, JSON.stringify(p)]);
+      return save.snapshotRef;
+    });
+  }
   async saves(user: string, id: string): Promise<Save[]> {
     await this.project(user, id);
     return (
       await this.db.query(
-        "SELECT data FROM saves WHERE project_id=$1 ORDER BY (data->>'number')::int DESC",
-        [id],
+        "SELECT s.data || jsonb_build_object('canDelete', j.user_id=$2) AS data FROM saves s JOIN jobs j ON j.id=s.job_id WHERE s.project_id=$1 AND coalesce(s.data->>'deleted','false')<>'true' ORDER BY (s.data->>'number')::int DESC",
+        [id, user],
       )
     ).rows.map((r) => r.data as unknown as Save);
   }
@@ -287,7 +337,10 @@ export class Store implements JobQueue {
     return this.db.transaction(async (db) => {
       await db.query('SELECT id FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
       const row = (
-        await db.query('SELECT data FROM saves WHERE id=$1 AND project_id=$2', [saveId, projectId])
+        await db.query(
+          "SELECT data FROM saves WHERE id=$1 AND project_id=$2 AND coalesce(data->>'deleted','false')<>'true'",
+          [saveId, projectId],
+        )
       ).rows[0];
       if (!row) throw new DomainError(404, 'Save not found');
       const save = row.data as unknown as Save;

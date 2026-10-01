@@ -42,7 +42,8 @@ const state = {
   jobs: [],
   models: [],
   saves: [],
-  view: 'projects',
+  view: 'chat',
+  newConversation: true,
   projectId: localStorage.getItem('pocket.project'),
   jobId: null,
   modelId: 'auto',
@@ -50,12 +51,59 @@ const state = {
   filter: '',
   loading: false,
 };
+let authConfig = { demo: true };
+let session = JSON.parse(sessionStorage.getItem('pocket.session') || 'null');
+async function accessToken() {
+  if (authConfig.demo) return 'pocket-local-demo';
+  if (!session) throw new Error('Sign in with GitHub to continue.');
+  if (session.expires_at <= Date.now() + 60000) {
+    session = await authExchange('refresh_token', { refresh_token: session.refresh_token });
+  }
+  return session.access_token;
+}
+async function authExchange(grant, body) {
+  const response = await fetch(`${authConfig.supabaseURL}/auth/v1/token?grant_type=${grant}`, {
+    method: 'POST',
+    headers: { apikey: authConfig.publishableKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json();
+  if (!response.ok)
+    throw new Error(result.error_description || result.msg || 'Sign-in failed. Please try again.');
+  result.expires_at = Date.now() + result.expires_in * 1000;
+  sessionStorage.setItem('pocket.session', JSON.stringify(result));
+  return result;
+}
+async function signIn() {
+  if (authConfig.demo) {
+    toast('GitHub sign-in is available in the iPhone app.');
+    return;
+  }
+  const encode = (bytes) =>
+    btoa(String.fromCharCode(...new Uint8Array(bytes)))
+      .replaceAll('+', '-')
+      .replaceAll('/', '_')
+      .replaceAll('=', '');
+  const verifier = encode(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = encode(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)),
+  );
+  sessionStorage.setItem('pocket.pkce', verifier);
+  const url = new URL(`${authConfig.supabaseURL}/auth/v1/authorize`);
+  url.search = new URLSearchParams({
+    provider: 'github',
+    redirect_to: location.origin + '/',
+    code_challenge: challenge,
+    code_challenge_method: 's256',
+  });
+  location.assign(url);
+}
 const content = document.querySelector('#content');
 async function api(path, body, key) {
   const response = await fetch(`/v1${path}`, {
     method: body ? 'POST' : 'GET',
     headers: {
-      Authorization: 'Bearer pocket-local-demo',
+      Authorization: `Bearer ${await accessToken()}`,
       ...(body
         ? { 'Content-Type': 'application/json', 'Idempotency-Key': key || crypto.randomUUID() }
         : {}),
@@ -69,7 +117,8 @@ async function api(path, body, key) {
 const project = () => state.projects.find((p) => p.id === state.projectId) || state.projects[0];
 const jobs = () =>
   state.jobs.filter((j) => j.projectId === project()?.id && j.branch === project()?.branch);
-const currentJob = () => jobs().find((j) => j.id === state.jobId) || jobs()[0];
+const currentJob = () =>
+  state.newConversation ? null : jobs().find((j) => j.id === state.jobId) || jobs()[0];
 const active = (j) => j && !['completed', 'failed', 'cancelled'].includes(j.status);
 const relative = (d) => {
   const m = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 60000));
@@ -100,105 +149,108 @@ function toast(message) {
   toast.timer = setTimeout(() => (t.hidden = true), 5500);
 }
 function logo(p) {
-  return `<div class="project-logo" style="color:${/^#[0-9a-f]{6}$/i.test(p.color) ? p.color : '#79936d'};background:${p.name === 'Pocket' ? '#f6eee7' : p.name === 'Atlas' ? '#edf1f6' : '#eff2e9'}">${icon(p.name === 'Butterfly' ? 'butterfly' : p.name === 'Atlas' ? 'atlas' : 'saves')}</div>`;
+  return `<div class="project-logo" style="color:${p.name === 'Pocket' ? '#874025' : p.name === 'Atlas' ? '#625D3D' : '#6E7161'};background:${'#E5CFA6'}">${icon(p.name === 'Butterfly' ? 'butterfly' : p.name === 'Atlas' ? 'atlas' : 'saves')}</div>`;
 }
-function heading(eyebrow, title, subtitle, action = '') {
-  return `<div class="eyebrow"><span></span>${eyebrow}</div><div class="heading-row"><div><h1>${title}</h1><p class="subtitle">${subtitle}</p></div>${action}</div>`;
+function heading(title, action = '') {
+  return `<div class="heading-row"><h1>${title}</h1>${action}</div>`;
 }
 function button(text, action, ic = 'arrow', primary = false, data = '') {
   return `<button class="button${primary ? ' primary' : ''}" data-action="${action}" ${data}>${ic ? icon(ic) : ''}${text}</button>`;
 }
 function renderNav() {
-  for (const id of ['desktop-nav', 'mobile-nav'])
-    document.getElementById(id).innerHTML = [
-      'projects',
-      'chat',
-      'changes',
-      'saves',
-      'agents',
-      'settings',
-    ]
-      .map(
-        (v) =>
-          `<button class="nav-item ${state.view === v ? 'active' : ''}" data-view="${v}" ${state.view === v ? 'aria-current="page"' : ''}>${icon(v)}${v[0].toUpperCase() + v.slice(1)}${v === 'agents' && state.jobs.some(active) ? `<span class="count">${state.jobs.filter(active).length}</span>` : ''}</button>`,
-      )
-      .join('');
+  const activity = ['agents', 'changes', 'saves'].includes(state.view);
+  const item = (v, name, selected = state.view === v) =>
+    `<button class="nav-item ${selected ? 'active' : ''}" data-view="${v}" ${selected ? 'aria-current="page"' : ''}>${icon(v)}${name}${v === 'agents' && state.jobs.some(active) ? `<span class="count">${state.jobs.filter(active).length}</span>` : ''}</button>`;
+  document.querySelector('#desktop-nav').innerHTML =
+    item('chat', 'Chat') +
+    item('projects', 'Repos') +
+    item('agents', 'Activity') +
+    '<div class="nav-separator"></div>' +
+    item('changes', 'Changes') +
+    item('saves', 'Checkpoints') +
+    item('settings', 'Settings');
+  document.querySelector('#mobile-nav').innerHTML =
+    item('chat', 'Chat') + item('projects', 'Repos') + item('agents', 'Activity', activity);
   document.querySelector('#breadcrumb').textContent =
+    { projects: 'Repositories', agents: 'Activity', saves: 'Checkpoints' }[state.view] ||
     state.view[0].toUpperCase() + state.view.slice(1);
 }
 function renderContext() {
   const p = project();
   if (!p) return;
   document.querySelector('#context').innerHTML =
-    `<div class="context-heading">${icon('memory')}PROJECT MEMORY</div><div class="context-project">${logo(p)}<div><strong>${escape(p.name)}</strong><small>${escape(p.owner)} / ${escape(p.branch)}</small></div></div><p>A little context.<br>A lot less explaining.</p><div class="context-section"><h4>Stack</h4><div class="tags">${p.memory.stack.map((s) => `<span class="tag">${escape(s)}</span>`).join('')}</div></div><div class="context-section"><h4>Current objective</h4><p>${escape(p.memory.objective || 'Your next idea starts here.')}</p></div><div class="context-section"><h4>Keep in mind</h4>${p.memory.decisions.map((s) => `<div class="decision">${icon('check')}<span>${escape(s)}</span></div>`).join('')}${button('View project memory', 'memory', 'arrow')}</div><div class="context-bottom">${icon('shield')}<strong>Your work stays yours.</strong><p>Review every change. Nothing ships without your say.</p></div>`;
+    `<div class="context-heading">${icon('memory')}PROJECT MEMORY</div><div class="context-project">${logo(p)}<div><strong>${escape(p.name)}</strong><small>${escape(p.owner)} / ${escape(p.branch)}</small></div></div><div class="context-section"><h4>Stack</h4><div class="tags">${p.memory.stack.map((s) => `<span class="tag">${escape(s)}</span>`).join('')}</div></div><div class="context-section"><h4>Current objective</h4><p>${escape(p.memory.objective || 'New task')}</p></div><div class="context-section"><h4>Keep in mind</h4>${p.memory.decisions.map((s) => `<div class="decision">${icon('check')}<span>${escape(s)}</span></div>`).join('')}${button('View project memory', 'memory', 'arrow')}</div>`;
 }
 function projectsView() {
   const p = project();
   const recent = state.jobs.find((j) => j.status === 'completed');
   return (
-    heading(
-      'A little space. A lot of possibility.',
-      'Good things start <em>here.</em>',
-      'Your projects, ready for your next idea.',
-      button('Connect repository', 'connect', 'plus'),
-    ) +
-    `<div class="projects-toolbar"><button class="filter-tab">All projects <span>${state.projects.length}</span></button><label class="search-box">${icon('search')}<input id="project-search" placeholder="Find a project…" aria-label="Search projects" value="${escape(state.filter)}"></label></div><div class="project-list">${
+    heading('Repositories', button('Connect repository', 'connect', 'plus')) +
+    `<div class="projects-toolbar"><button class="filter-tab">Connected <span>${state.projects.length}</span></button><label class="search-box">${icon('search')}<input id="project-search" placeholder="Search repositories" aria-label="Search projects" value="${escape(state.filter)}"></label></div><div class="project-list">${
       state.projects
         .filter((p) =>
           (p.name + ' ' + p.description).toLowerCase().includes(state.filter.toLowerCase()),
         )
         .map((p) => {
           const j = state.jobs.find((j) => j.projectId === p.id);
-          return `<a class="project-card" href="#chat" data-project="${p.id}">${logo(p)}<div><h2 class="project-name">${escape(p.name)}</h2><div class="project-description">${escape(p.description)}</div><div class="project-meta"><span><i class="language-dot" style="background:${p.language === 'Swift' ? '#daa17e' : '#8aa4bc'}"></i>${escape(p.language)}</span><span class="branch">${icon('branch')}${escape(p.branch)}</span><span>${escape(p.owner)}</span></div></div><div class="project-card-right"><span class="project-state ${!j ? 'neutral' : ''}">${j ? label(j.status) : 'Ready when you are'}</span>${icon('arrow')}</div></a>`;
+          return `<a class="project-card" href="#chat" data-project="${p.id}">${logo(p)}<div><h2 class="project-name">${escape(p.name)}</h2><div class="project-description">${escape(p.description)}</div><div class="project-meta"><span><i class="language-dot" style="background:${p.language === 'Swift' ? '#daa17e' : '#8aa4bc'}"></i>${escape(p.language)}</span><span class="branch">${icon('branch')}${escape(p.branch)}</span><span>${escape(p.owner)}</span></div></div><div class="project-card-right"><span class="project-state ${!j ? 'neutral' : ''}">${j ? label(j.status) : 'Ready'}</span>${icon('arrow')}</div></a>`;
         })
         .join('') || '<div class="empty-state"><p>No projects match your search.</p></div>'
-    }</div><div class="section-label">PICK UP WHERE YOU LEFT OFF</div>${recent ? `<div class="activity-card"><div class="activity-icon">${icon('check')}</div><div><strong>Mobile dashboard, sorted.</strong><p>${escape(state.projects.find((p) => p.id === recent.projectId)?.name)} · ${recent.report.files.length} files changed · ready for review</p><span class="activity-meta">${relative(recent.updatedAt)} · Demo result</span></div>${button('Review', 'review', 'arrow', false, `data-job="${recent.id}"`)}</div>` : '<div class="activity-card"><div><strong>A fresh start.</strong><p>Your completed tasks will appear here.</p></div></div>'}<div class="idea-card">${icon('leaf')}<div><strong>Big ideas. Pocket-sized beginnings.</strong><p>A fix, a feature, a “what if.” Just tell Pocket what’s on your mind.</p></div>${button('Start a conversation', 'start', 'arrow', false, `data-project="${p?.id}"`)}</div>`
+    }</div><div class="section-label">RECENT TASK</div>${recent ? `<div class="activity-card"><div class="activity-icon">${icon('check')}</div><div><strong>Ready to review</strong><p>${escape(state.projects.find((p) => p.id === recent.projectId)?.name)} · ${recent.report.files.length} files changed · ready for review</p><span class="activity-meta">${relative(recent.updatedAt)} · Demo result</span></div>${button('Review', 'review', 'arrow', false, `data-job="${recent.id}"`)}</div>` : '<div class="activity-card"><div><p>No completed tasks.</p></div></div>'}`
   );
 }
 function selector() {
   const p = project();
-  return `<div class="chat-header"><div class="repo-select"><select id="repo-select" aria-label="Repository">${state.projects.map((r) => `<option value="${r.id}" ${r.id === p.id ? 'selected' : ''}>${escape(r.name)}</option>`).join('')}</select><span class="slash">/</span><select id="branch-select" aria-label="Branch">${p.branches.map((b) => `<option ${b === p.branch ? 'selected' : ''}>${escape(b)}</option>`).join('')}</select></div><label class="model-label">Model <select class="model-select" id="model-select" aria-label="Model">${state.models.map((m) => `<option value="${escape(m.id)}" ${m.id === state.modelId ? 'selected' : ''}>${escape(m.name)}</option>`).join('')}</select></label></div>`;
+  return `<div class="chat-header"><div class="repo-select"><select id="repo-select" aria-label="Repository">${state.projects.map((r) => `<option value="${r.id}" ${r.id === p.id ? 'selected' : ''}>${escape(r.name)}</option>`).join('')}</select><span class="slash">/</span><select id="branch-select" aria-label="Branch">${p.branches.map((b) => `<option ${b === p.branch ? 'selected' : ''}>${escape(b)}</option>`).join('')}</select></div></div>`;
 }
 function jobCard(j) {
   if (!j) return '';
   if (active(j)) {
     const order = ['queued', 'analyzing', 'planning', 'editing', 'testing'];
-    return `<div class="job-card"><div class="job-card-top"><span class="spinner"></span>Pocket is working</div><div class="run-phases">${order.map((s, i) => `<div class="phase ${s === j.status ? 'current' : i > order.indexOf(j.status) ? 'future' : ''}">${icon(i < order.indexOf(j.status) ? 'check' : 'clock')}${{ queued: 'Waiting for an agent slot', analyzing: 'Analyzing repository', planning: 'Planning your changes', editing: 'Editing files', testing: 'Running checks' }[s]}</div>`).join('')}</div>${button('Cancel task', 'cancel', null, false, `data-job="${j.id}"`)}<div class="demo-note">Simulated local run. No external repository is modified.</div></div>`;
+    return `<div class="job-card"><div class="job-card-top"><span class="spinner"></span>Pocket is working</div><div class="run-phases">${order.map((s, i) => `<div class="phase ${s === j.status ? 'current' : i > order.indexOf(j.status) ? 'future' : ''}">${icon(i < order.indexOf(j.status) ? 'check' : 'clock')}${{ queued: 'Waiting for an agent slot', analyzing: 'Analyzing repository', planning: 'Planning your changes', editing: 'Editing files', testing: 'Running checks' }[s]}</div>`).join('')}</div>${button('Cancel task', 'cancel', null, false, `data-job="${j.id}"`)}<div class="demo-note">Demo · simulated execution</div></div>`;
   }
   if (j.status !== 'completed')
     return `<div class="job-card"><div class="job-card-top">${icon('clock')}${label(j.status)}</div><p>${escape(j.error || 'You cancelled this task.')}</p>${button('Try again', 'retry', 'arrow', false, `data-job="${j.id}"`)}</div>`;
   const r = j.report;
-  return `<div class="job-card"><div class="job-card-top">${icon('check')}Ready for your review</div><div class="job-stat"><strong>${r.files.length} files changed</strong><span class="addition">+${r.files.reduce((n, f) => n + f.additions, 0)}</span><span class="deletion">−${r.files.reduce((n, f) => n + f.deletions, 0)}</span></div><div class="checks">${r.checks.map((c) => `<span class="check">${icon(c.status === 'passed' ? 'check' : 'clock')}${escape(c.name)} ${c.status}</span>`).join('')}</div><div class="job-actions">${button('Review changes', 'review', 'arrow', true, `data-job="${j.id}"`)}${button('Saved automatically', 'saves', 'saves')}</div><div class="demo-note">Demo diff and simulated checks. No code was executed.</div></div>`;
+  return `<div class="job-card"><div class="job-card-top">${icon('check')}Ready for your review</div><div class="job-stat"><strong>${r.files.length} files changed</strong><span class="addition">+${r.files.reduce((n, f) => n + f.additions, 0)}</span><span class="deletion">−${r.files.reduce((n, f) => n + f.deletions, 0)}</span></div><div class="checks">${r.checks.map((c) => `<span class="check">${icon(c.status === 'passed' ? 'check' : 'clock')}${escape(c.name)} ${c.status}</span>`).join('')}</div><div class="job-actions">${button('Review changes', 'review', 'arrow', true, `data-job="${j.id}"`)}${button('Saved automatically', 'saves', 'saves')}</div><div class="demo-note">Demo · simulated result</div></div>`;
 }
 function chatView() {
   const j = currentJob();
+  const options = state.models
+    .map(
+      (m) =>
+        `<option value="${escape(m.id)}" ${m.id === state.modelId ? 'selected' : ''}>${escape(m.name)}</option>`,
+    )
+    .join('');
   return (
-    heading(
-      'From thought to shipped.',
-      'What’s on your <em>mind?</em>',
-      'One message. A little less on your plate.',
-    ) +
+    heading('Chat', button('New chat', 'new-chat', 'plus')) +
     selector() +
-    `<div class="conversation">${j ? `<div class="message-user">${escape(j.prompt)}</div><div class="message-agent"><div class="message-label"><span class="pocket-mark"></span> POCKET <span>· ${relative(j.updatedAt)}</span></div>${j.report ? escape(j.report.summary) : active(j) ? 'I’ll work through this and bring the changes back for your review.' : 'Every idea is worth another try.'}${jobCard(j)}</div>` : `<div class="empty-state">${icon('chat')}<h2>Your next idea starts here.</h2><p>Ask Pocket to fix something, build something, or explore a possibility.</p></div>`}</div><form class="composer" id="composer"><textarea id="prompt" placeholder="Ask Pocket to build, fix, or explore…" aria-label="Task for Pocket" required minlength="3" maxlength="12000">${escape(state.draft)}</textarea><div class="composer-footer"><span>${icon('shield').replace('<svg', '<svg style="display:inline;width:10px;height:10px;vertical-align:middle;margin-right:4px"')} You’re in control of what ships.</span><button class="button primary" type="submit" ${state.loading ? 'disabled' : ''}>${icon('up')}Send</button></div></form><div class="composer-hint">Demo workspace · Cloud execution requires configured providers</div>`
+    `<div class="conversation">${
+      j
+        ? `<div class="message-user">${escape(j.prompt)}</div><div class="message-agent"><div class="message-label"><span class="pocket-mark"></span>Pocket <span>${relative(j.updatedAt)}</span></div>${escape(j.report?.summary || j.error || '')}${jobCard(j)}</div>`
+        : `<div class="empty-chat"><div class="orb"><span class="pocket-mark"></span></div><h2>What can we build?</h2><div class="suggestions">${[
+            ['Fix a bug', 'butterfly', 'Help me fix a bug: '],
+            ['Build a feature', 'plus', 'Build a feature: '],
+            ['Review code', 'shield', 'Review the code and suggest improvements: '],
+            ['Add tests', 'check', 'Add meaningful tests for: '],
+          ]
+            .map(
+              ([title, ic, prompt]) =>
+                `<button class="suggestion" data-action="suggestion" data-prompt="${escape(prompt)}">${icon(ic)}${title}</button>`,
+            )
+            .join('')}</div></div>`
+    }</div><form class="composer" id="composer"><textarea id="prompt" placeholder="Message Pocket" aria-label="Task for Pocket" required minlength="3" maxlength="12000">${escape(state.draft)}</textarea><div class="composer-footer"><label class="composer-model">${icon('agents')}<select id="composer-model" aria-label="Model">${options}</select></label><button class="button primary" type="submit" aria-label="Send" ${state.loading ? 'disabled' : ''}>${icon('up')}Send</button></div></form><div class="composer-hint">Demo · simulated execution</div>`
   );
 }
 function changesView() {
   const j = currentJob();
   if (!j?.report)
     return (
-      heading(
-        'A closer look.',
-        'Every change. <em>Yours to review.</em>',
-        'Good work deserves a second look.',
-      ) +
+      heading('Changes') +
       `<div class="empty-state">${icon('changes')}<h2>No changes yet.</h2><p>Start a task and Pocket will bring the diff here.</p>${button('Open chat', 'chat', 'arrow', true)}</div>`
     );
   return (
-    heading(
-      'A closer look.',
-      'The details <em>matter.</em>',
-      `${escape(project().name)} / ${escape(j.branch)} · ${escape(label(j.status))}`,
-    ) +
+    heading('Changes') +
     `<div class="diff-summary"><strong>${j.report.files.length} files changed</strong><span class="addition">+${j.report.files.reduce((n, f) => n + f.additions, 0)}</span><span class="deletion">−${j.report.files.reduce((n, f) => n + f.deletions, 0)}</span><span>Demo diff</span></div>${j.report.files
       .map(
         (f, i) =>
@@ -212,38 +264,26 @@ function changesView() {
       )
       .join(
         '',
-      )}<div class="checks">${j.report.checks.map((c) => `<span class="check">${icon('check')}${escape(c.detail)}</span>`).join('')}</div><div class="review-footer">${button('Create PR', 'ship', 'github', true, 'data-kind="pr"')}${button('Push branch', 'ship', 'up', false, 'data-kind="push"')}${button('Request changes', 'request', 'chat')}${button('View Save', 'saves', 'saves')}</div><div class="demo-note">Nothing is pushed automatically. Shipping actions are simulated in this workspace.</div>`
+      )}<div class="checks">${j.report.checks.map((c) => `<span class="check">${icon('check')}${escape(c.detail)}</span>`).join('')}</div><div class="review-footer">${button('Create PR', 'ship', 'github', true, 'data-kind="pr"')}${button('Push branch', 'ship', 'up', false, 'data-kind="push"')}${button('Request changes', 'request', 'chat')}${button('View Save', 'saves', 'saves')}</div><div class="demo-note">Demo: no GitHub changes.</div>`
   );
 }
 function savesView() {
   return (
-    heading(
-      'A little peace of mind.',
-      'Room to <em>experiment.</em>',
-      'Every finished task is a Save. Come back to it whenever you like.',
-    ) +
-    `<div style="margin-top:32px">${state.saves.map((s) => `<div class="save-card"><div class="save-number">#${s.number}</div><div class="save-body"><strong>${escape(s.title)}</strong><small>${escape(project().name)} · ${relative(s.createdAt)} · Git checkpoint</small></div>${button('Restore', 'restore', 'clock', false, `data-save="${s.id}"`)}</div>`).join('') || `<div class="empty-state">${icon('saves')}<h2>Good ideas deserve a safety net.</h2><p>Your first finished task creates your first Save.</p></div>`}</div><div class="idea-card">${icon('shield')}<div><strong>Try the “what if.”</strong><p>A restore selects the starting point for your next task. Your remote branch stays untouched.</p></div></div>`
+    heading('Checkpoints') +
+    `<div style="margin-top:32px">${state.saves.map((s) => `<div class="save-card"><div class="save-number">#${s.number}</div><div class="save-body"><strong>${escape(s.title)}</strong><small>${escape(project().name)} · ${relative(s.createdAt)} · Git checkpoint</small></div>${button('Restore', 'restore', 'clock', false, `data-save="${s.id}"`)}</div>`).join('') || `<div class="empty-state">${icon('saves')}<h2>No saves</h2><p>Your first finished task creates your first Save.</p></div>`}</div>`
   );
 }
 function agentsView() {
   return (
-    heading(
-      'Quietly getting it done.',
-      'A little work <em>in motion.</em>',
-      'Put your phone away. Pocket keeps going.',
-    ) +
+    heading('Activity') +
     `<div style="margin-top:26px">${state.jobs.map((j) => `<a class="agent-card" href="#chat" data-agent="${j.id}">${active(j) ? '<span class="spinner"></span>' : icon(j.status === 'completed' ? 'check' : 'clock')}<div><strong>${escape(j.prompt.slice(0, 130))}</strong><small>${escape(state.projects.find((p) => p.id === j.projectId)?.name)} / ${escape(j.branch)} · ${relative(j.createdAt)} · ${j.demo ? 'Demo' : escape(j.modelId)}</small></div><span class="project-state">${label(j.status)}</span></a>`).join('') || '<div class="empty-state"><p>Your tasks will appear here.</p></div>'}</div>`
   );
 }
 function settingsView() {
   const total = state.jobs.reduce((n, j) => n + (j.report?.costCents ?? 0), 0);
   return (
-    heading(
-      'Make yourself at home.',
-      'Small details. <em>Your way.</em>',
-      'A quieter, more personal workspace.',
-    ) +
-    `<div class="settings-section"><h2>Connections</h2><div class="setting-row"><div>GitHub<small>Demo repositories · no account connected</small></div>${button('Connect', 'connect', 'external')}</div></div><div class="settings-section"><h2>Models & usage</h2><div class="setting-row"><div>Default model<small>Available models come from the Pocket API</small></div><select id="model-select" class="model-select" aria-label="Default model">${state.models.map((m) => `<option value="${escape(m.id)}" ${m.id === state.modelId ? 'selected' : ''}>${escape(m.name)}</option>`).join('')}</select></div><div class="setting-row"><div>Task budget<small>Hard cap for new tasks</small></div><span class="setting-value">$3.00 / task</span></div><div class="setting-row"><span>Recorded model cost</span><span class="setting-value">$${(total / 100).toFixed(2)} · demo</span></div><div class="setting-row"><span>Tasks</span><span class="setting-value">${state.jobs.length}</span></div></div><div class="settings-section"><h2>Preferences</h2><div class="setting-row"><div>Notify when a task finishes<small>Browser notifications while this preview is open</small></div><button class="toggle ${localStorage.getItem('pocket.notifications') === 'true' ? '' : 'off'}" data-action="notifications" role="switch" aria-checked="${localStorage.getItem('pocket.notifications') === 'true'}" aria-label="Task completion notifications"></button></div></div><div class="settings-section"><h2>Security</h2><div class="setting-row"><div>Shipping approval<small>Every push and pull request requires your approval</small></div>${icon('shield')}</div><div class="setting-row"><div>Ephemeral cloud sandboxes<small>Created for a task. Deleted after it finishes.</small></div><span class="setting-value">Daytona adapter</span></div><div class="setting-row"><div>Session<small>Local demo · bound to 127.0.0.1</small></div><span class="setting-value">Demo</span></div></div>`
+    heading('Settings') +
+    `<div class="settings-section"><h2>Connections</h2><div class="setting-row"><div>GitHub<small>Not connected</small></div>${button('Connect', 'connect', 'external')}</div></div><div class="settings-section"><h2>Models & usage</h2><div class="setting-row"><div>Default model<small></small></div><select id="model-select" class="model-select" aria-label="Default model">${state.models.map((m) => `<option value="${escape(m.id)}" ${m.id === state.modelId ? 'selected' : ''}>${escape(m.name)}</option>`).join('')}</select></div><div class="setting-row"><div>Task budget<small>Hard cap for new tasks</small></div><span class="setting-value">$3.00 / task</span></div><div class="setting-row"><span>Recorded model cost</span><span class="setting-value">$${(total / 100).toFixed(2)} · demo</span></div><div class="setting-row"><span>Tasks</span><span class="setting-value">${state.jobs.length}</span></div></div><div class="settings-section"><h2>Preferences</h2><div class="setting-row"><div>Notify when a task finishes<small>While this tab is open</small></div><button class="toggle ${localStorage.getItem('pocket.notifications') === 'true' ? '' : 'off'}" data-action="notifications" role="switch" aria-checked="${localStorage.getItem('pocket.notifications') === 'true'}" aria-label="Task completion notifications"></button></div></div>`
   );
 }
 const views = {
@@ -257,7 +297,7 @@ const views = {
 function render() {
   renderNav();
   renderContext();
-  content.innerHTML = `<section class="page page-entrance">${views[state.view]()}</section>`;
+  content.innerHTML = `<section class="page page-entrance ${state.view === 'chat' ? 'chat-page' : ''}">${views[state.view]()}</section>`;
 }
 async function navigate(view) {
   if (!views[view]) view = 'projects';
@@ -287,6 +327,7 @@ async function submit(prompt) {
       modelId: state.modelId,
       maxCostCents: 300,
     });
+    state.newConversation = false;
     state.jobs.unshift(j);
     state.jobId = j.id;
     state.draft = '';
@@ -310,7 +351,13 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', async (e) => {
   try {
-    if (e.target.id === 'model-select') state.modelId = e.target.value;
+    if (e.target.id === 'model-select' || e.target.id === 'composer-model') {
+      state.modelId = e.target.value;
+      const other = document.querySelector(
+        e.target.id === 'model-select' ? '#composer-model' : '#model-select',
+      );
+      if (other) other.value = state.modelId;
+    }
     if (e.target.id === 'branch-select') {
       project().branch = e.target.value;
       renderContext();
@@ -347,6 +394,7 @@ document.addEventListener('click', async (e) => {
       const j = state.jobs.find((j) => j.id === el.dataset.agent);
       state.projectId = j.projectId;
       project().branch = j.branch;
+      state.newConversation = false;
       state.jobId = j.id;
       await navigate('chat');
       return;
@@ -361,6 +409,10 @@ document.addEventListener('click', async (e) => {
       }
     }
     const action = el.dataset.action;
+    if (action === 'reload') {
+      location.reload();
+      return;
+    }
     if (views[action]) {
       await navigate(action);
       return;
@@ -369,7 +421,20 @@ document.addEventListener('click', async (e) => {
       await navigate('chat');
       document.querySelector('#prompt').focus();
     }
+    if (action === 'new-chat') {
+      state.newConversation = true;
+      state.jobId = null;
+      state.draft = '';
+      await navigate('chat');
+      document.querySelector('#prompt').focus();
+    }
+    if (action === 'suggestion') {
+      state.draft = el.dataset.prompt;
+      await navigate('chat');
+      document.querySelector('#prompt').focus();
+    }
     if (action === 'review') {
+      state.newConversation = false;
       state.jobId = el.dataset.job;
       const j = state.jobs.find((j) => j.id === state.jobId);
       state.projectId = j.projectId;
@@ -395,7 +460,7 @@ document.addEventListener('click', async (e) => {
     }
     if (action === 'connect')
       modal(
-        `<div class="eyebrow">YOUR REPOSITORIES</div><h2>A place for your projects.</h2><p>This local workspace uses three demo projects. A real connection uses Supabase GitHub sign-in and your GitHub App installation.</p><p>Configure the server credentials and sign in from the native app to connect authorized repositories.</p><div class="dialog-actions">${button('Got it', 'close', null, true)}</div>`,
+        `<h2>Connect GitHub</h2><p>Use Sign in with GitHub in the iPhone app to connect your account. These preview repositories are demo projects.</p><div class="dialog-actions">${button('Close', 'close', null, true)}</div>`,
       );
     if (action === 'memory') {
       const p = project();
@@ -485,17 +550,42 @@ async function refresh() {
 }
 (async () => {
   try {
+    authConfig = await (await fetch('/auth/config')).json();
+    if (!authConfig.demo) {
+      document.querySelector('.demo-label').hidden = true;
+      document.querySelector('.connection').textContent = 'GitHub workspace';
+      const params = new URLSearchParams(location.search);
+      if (params.get('error_description')) throw new Error(params.get('error_description'));
+      if (params.has('code')) {
+        const verifier = sessionStorage.getItem('pocket.pkce');
+        if (!verifier) throw new Error('Please start sign-in again in this browser.');
+        session = await authExchange('pkce', {
+          auth_code: params.get('code'),
+          code_verifier: verifier,
+        });
+        sessionStorage.removeItem('pocket.pkce');
+        history.replaceState(null, '', location.pathname);
+      }
+      if (!session) {
+        renderNav();
+        content.innerHTML = `<div class="page empty-chat sign-in-page"><div class="orb"><span class="pocket-mark"></span></div><h1>Pocket</h1><p>Your development workspace.</p>${button('Sign in with GitHub', 'sign-in', 'github', true)}</div>`;
+        return;
+      }
+    }
+
     [state.projects, state.models, state.jobs] = await Promise.all([
       api('/projects'),
       api('/models'),
       api('/jobs'),
     ]);
     if (!project()) {
-      content.innerHTML = '<div class="empty-state">No projects connected.</div>';
+      renderNav();
+      content.innerHTML =
+        '<div class="page empty-state"><h2>No repositories connected</h2><p>Connect your repositories from the Pocket iPhone app. They will appear here too.</p></div>';
       return;
     }
     state.projectId = project().id;
-    await navigate(location.hash.slice(1) || 'projects');
+    await navigate(location.hash.slice(1) || 'chat');
     setInterval(() => {
       if (document.visibilityState === 'visible' && state.jobs.some(active))
         refresh().catch((e) => toast(e.message));
@@ -504,6 +594,6 @@ async function refresh() {
       if (document.visibilityState === 'visible') refresh().catch((e) => toast(e.message));
     });
   } catch (err) {
-    content.innerHTML = `<div class="page empty-state"><h2>Couldn’t reach Pocket.</h2><p>${escape(err.message)}</p><p>Start the API with npm run dev, then reload.</p></div>`;
+    content.innerHTML = `<div class="page empty-state"><h2>Couldn’t reach Pocket.</h2><p>${escape(err.message)}</p><button class="button" data-action="reload">Try again</button></div>`;
   }
 })();

@@ -53,6 +53,13 @@ test('Git Saves preserve edits, deletes, untracked files and restore after sandb
     await handle.write('app.ts', 'const value = 2;\n');
     await writeFile(join(root, 'new.ts'), 'export const created = true;\n');
     await rm(join(root, 'remove.txt'));
+    await mkdir(join(root, '.agents/rules'), { recursive: true });
+    await writeFile(join(root, '.agents/rules/project.md'), 'Project rules');
+    const directory = await handle.read('.agents/rules');
+    assert.equal(JSON.parse(directory).directory, true);
+    assert.deepEqual(JSON.parse(directory).entries, ['project.md']);
+    assert.equal(await handle.read('.agents/rules/project.md'), 'Project rules');
+    await rm(join(root, '.agents'), { recursive: true });
     const save = await handle.checkpoint(base);
     assert.equal(save.files.length, 3);
     assert.match(save.files.find((f) => f.path === 'app.ts')!.patch, /\+const value = 2/);

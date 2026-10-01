@@ -70,6 +70,7 @@ export class GitHubAuthorization {
       headers: {
         Authorization: `Bearer ${data.access_token}`,
         Accept: 'application/vnd.github+json',
+        'User-Agent': 'Pocket/0.1',
       },
       signal: AbortSignal.timeout(15000),
     });

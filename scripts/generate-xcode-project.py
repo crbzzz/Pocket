@@ -2,6 +2,11 @@
 """Generate the small, dependency-free app project; PocketCore is a local package."""
 from pathlib import Path
 from hashlib import sha1
+import subprocess
+try:
+    development_host = subprocess.check_output(["scutil", "--get", "LocalHostName"], text=True).strip()+".local"
+except (OSError, subprocess.CalledProcessError):
+    development_host = "localhost"
 root = Path(__file__).resolve().parents[1] / 'apps/ios'
 project = root / 'Pocket.xcodeproj'
 project.mkdir(exist_ok=True)
@@ -15,6 +20,7 @@ for f in files:
 obj('assets', 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = \"<group>\";')
 obj('assets-build', f'isa = PBXBuildFile; fileRef = {uid("assets")};')
 obj('info', 'isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";')
+obj('configuration', 'isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Pocket.xcconfig; sourceTree = SOURCE_ROOT;')
 obj('app', 'isa = PBXFileReference; explicitFileType = wrapper.application; path = Pocket.app; sourceTree = BUILT_PRODUCTS_DIR;')
 obj('core-build', f'isa = PBXBuildFile; productRef = {uid("core-product")};')
 obj('core-product', f'isa = XCSwiftPackageProductDependency; package = {uid("core-package")}; productName = PocketCore;')
@@ -31,9 +37,10 @@ for group in ['target','project']:
     obj(group+'-config',f'isa = XCConfigurationList; buildConfigurations = ({uid(group+"-Debug")},{uid(group+"-Release")}); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;')
     for mode in ['Debug','Release']:
         settings = 'SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; ALWAYS_SEARCH_USER_PATHS = NO;'
-        if group=='target': settings += ' ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; PRODUCT_BUNDLE_IDENTIFIER = app.pocket.ios; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = Pocket/Info.plist; TARGETED_DEVICE_FAMILY = 1; CODE_SIGN_STYLE = Automatic; SUPABASE_URL = ""; SUPABASE_PUBLISHABLE_KEY = ""; ENABLE_PREVIEWS = YES;'
-        settings += ' SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = dwarf; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;' if mode=='Debug' else ' SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";'
-        obj(group+'-'+mode,f'isa = XCBuildConfiguration; buildSettings = {{ {settings} }}; name = {mode};')
+        if group=='target': settings += ' ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; PRODUCT_BUNDLE_IDENTIFIER = com.edouardbaudouin.pocket.z5wj68myh6; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = Pocket/Info.plist; TARGETED_DEVICE_FAMILY = 1; CODE_SIGN_STYLE = Automatic; SUPABASE_URL = "$(POCKET_SUPABASE_URL)"; SUPABASE_PUBLISHABLE_KEY = "$(POCKET_SUPABASE_PUBLISHABLE_KEY)"; ENABLE_PREVIEWS = YES;'
+        settings += ' ONLY_ACTIVE_ARCH = YES; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = dwarf; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;' if mode=='Debug' else ' SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";'
+        configuration = f'baseConfigurationReference = {uid("configuration")};' if group=='target' else ''
+        obj(group+'-'+mode,f'isa = XCBuildConfiguration; {configuration} buildSettings = {{ {settings} }}; name = {mode};')
 (project / 'project.pbxproj').write_text('// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 60; objects = {\n'+'\n'.join(objects)+'\n}; rootObject = '+uid('project')+'; }\n')
 scheme = project / 'xcshareddata/xcschemes'
 scheme.mkdir(parents=True,exist_ok=True)

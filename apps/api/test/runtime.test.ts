@@ -102,7 +102,7 @@ async function harness(actions: unknown[], budget = 300) {
     randomUUID(),
     false,
   );
-  return { db, store, worker, job, stats: () => ({ deleted, writes, calls, stored }) };
+  return { db, store, worker, job, handle, stats: () => ({ deleted, writes, calls, stored }) };
 }
 test('real runtime uses bounded tools, persists usage and destroys sandbox', async () => {
   const h = await harness([
@@ -174,6 +174,23 @@ test('runtime cancellation destroys compute and does not persist a completed rep
     assert.equal((await h.store.job(demoUser, h.job.id)).status, 'failed');
     assert.equal(h.stats().calls, 0);
     assert.equal(h.stats().stored, 0);
+  } finally {
+    await h.db.close();
+  }
+});
+
+test('unavailable reads are returned to the model, allowing a summary to complete', async () => {
+  const h = await harness([
+    { kind: 'read', path: '.agents/rules' },
+    { kind: 'finish', summary: 'Recovered and summarized.' },
+  ]);
+  h.handle.read = async () => {
+    throw new Error('path points to a directory');
+  };
+  try {
+    await h.worker.runOne();
+    assert.equal((await h.store.job(demoUser, h.job.id)).status, 'completed');
+    assert.equal(h.stats().deleted, 1);
   } finally {
     await h.db.close();
   }

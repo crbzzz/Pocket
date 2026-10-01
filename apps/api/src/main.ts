@@ -1,3 +1,4 @@
+import './env.js';
 import { database } from './database.js';
 import { createServer } from './server.js';
 import { AgentWorker } from './agent.js';
@@ -73,5 +74,9 @@ process.once('SIGINT', () => void shutdown());
 process.once('SIGTERM', () => void shutdown());
 await app.listen({
   port: Number(process.env.PORT ?? 4310),
-  host: demo ? '127.0.0.1' : (process.env.HOST ?? '0.0.0.0'),
+  host: demo
+    ? process.env.POCKET_DEMO_LAN === 'true'
+      ? '0.0.0.0'
+      : '127.0.0.1'
+    : (process.env.HOST ?? '0.0.0.0'),
 });

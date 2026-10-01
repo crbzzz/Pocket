@@ -29,6 +29,12 @@ export class SupabaseCheckpoints implements CheckpointStorage {
     if (error) throw new Error('Checkpoint upload failed');
     return path;
   }
+  async remove(ref: string): Promise<void> {
+    if (!/^[a-f0-9-]+\/[a-f0-9-]+\.json$/.test(ref))
+      throw new Error('Invalid checkpoint reference');
+    const { error } = await this.client.storage.from('pocket-checkpoints').remove([ref]);
+    if (error) throw new Error('Checkpoint removal failed; please retry');
+  }
   async get(ref: string): Promise<Checkpoint> {
     if (!/^[a-f0-9-]+\/[a-f0-9-]+\.json$/.test(ref))
       throw new Error('Invalid checkpoint reference');

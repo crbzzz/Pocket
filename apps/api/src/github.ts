@@ -47,6 +47,7 @@ export class GitHubApp implements GitProvider {
         Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Pocket/0.1',
         'Content-Type': 'application/json',
       },
       body: body ? JSON.stringify(body) : undefined,
@@ -111,10 +112,53 @@ export class GitHubApp implements GitProvider {
     }
     return repos;
   }
+  async installationsForAccount(githubId: string): Promise<{ id: number; account: string }[]> {
+    const result: { id: number; account: string }[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const rows = await this.request(`/app/installations?per_page=100&page=${page}`, this.jwt());
+      for (const installation of rows) {
+        if (
+          installation.target_type === 'User' &&
+          String(installation.account.id) === githubId &&
+          !installation.suspended_at
+        )
+          result.push({ id: installation.id, account: installation.account.login });
+      }
+      if (rows.length < 100) return result;
+    }
+    throw new DomainError(422, 'Too many installations to sync safely');
+  }
+  async isAccountInstallation(githubId: string, installationId: number): Promise<boolean> {
+    try {
+      const installation = await this.request(`/app/installations/${installationId}`, this.jwt());
+      return (
+        installation.target_type === 'User' &&
+        String(installation.account.id) === githubId &&
+        !installation.suspended_at
+      );
+    } catch (error) {
+      if (error instanceof DomainError && error.statusCode === 404) return false;
+      throw error;
+    }
+  }
+  async installationsForUser(userToken: string): Promise<{ id: number; account: string }[]> {
+    const appId = Number(process.env.GITHUB_APP_ID);
+    if (!Number.isSafeInteger(appId) || appId <= 0)
+      throw new DomainError(503, 'GitHub App is not configured');
+    const installations: { id: number; account: string }[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const data = await this.request(`/user/installations?per_page=100&page=${page}`, userToken);
+      for (const installation of data.installations) {
+        if (installation.app_id === appId && !installation.suspended_at)
+          installations.push({ id: installation.id, account: installation.account.login });
+      }
+      if (data.installations.length < 100) return installations;
+    }
+    throw new DomainError(422, 'Too many GitHub installations to sync safely');
+  }
   async verifyInstallation(userToken: string, installationId: number): Promise<void> {
-    // Verify the installation belongs to the user's authenticated GitHub account.
-    const d = await this.request('/user/installations?per_page=100', userToken);
-    if (!d.installations.some((i: any) => i.id === installationId))
+    const installations = await this.installationsForUser(userToken);
+    if (!installations.some((installation) => installation.id === installationId))
       throw new DomainError(403, 'GitHub installation is not authorized for this account');
   }
   async ship(

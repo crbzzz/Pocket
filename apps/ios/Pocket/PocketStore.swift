@@ -1,3 +1,4 @@
+import AuthenticationServices
 import PocketCore
 import SwiftUI
 import UserNotifications
@@ -5,7 +6,7 @@ import UserNotifications
 @MainActor @Observable
 final class PocketStore {
   enum Tab: String, CaseIterable { case projects, chat, changes, saves, agents, settings }
-  var tab: Tab = .projects
+  var tab: Tab = .chat
   var projects: [Project] = []
   var jobs: [AgentJob] = []
   var models: [AgentModel] = []
@@ -18,9 +19,39 @@ final class PocketStore {
   var isLoading = false
   var isSending = false
   var error: String?
+  var connectionError: String?
+  var isSigningIn = false
+  var demoEntered = false
+  struct GitHubInstallation: Decodable, Identifiable, Sendable {
+    let id: Int
+    let account: String
+  }
+  var installations: [GitHubInstallation] = []
+  var isSyncing = false
+  var isDiscoveringRepositories = false
+  var repositoryError: String?
+  var showSettings = false
+  var isComposing = false
+  var newConversation = false
+  var accountName: String { auth.session?.user?.displayName ?? "GitHub" }
   var notice: String?
-  var apiURL = UserDefaults.standard.string(forKey: "apiURL") ?? "http://127.0.0.1:4310"
-  var demoMode = UserDefaults.standard.object(forKey: "demoMode") as? Bool ?? true
+  var apiURL = PocketStore.initialAPIURL()
+  private static func initialAPIURL() -> String {
+    let saved = UserDefaults.standard.string(forKey: "apiURL")
+    let configured = Bundle.main.object(forInfoDictionaryKey: "PocketAPIURL") as? String
+    if let configured, !configured.isEmpty, !configured.contains("$(") {
+      // Migrate stale development IP addresses after a rebuild or cloud deployment.
+      if saved == nil || URL(string: saved ?? "")?.scheme == "http" { return configured }
+    }
+    return saved ?? "http://127.0.0.1:4310"
+  }
+  private static func initialDemoMode() -> Bool {
+    if Bundle.main.object(forInfoDictionaryKey: "PocketBackendMode") as? String == "production" {
+      return false
+    }
+    return UserDefaults.standard.object(forKey: "demoMode") as? Bool ?? true
+  }
+  var demoMode = PocketStore.initialDemoMode()
   var notifications = UserDefaults.standard.bool(forKey: "notifications")
   var maxCostCents = UserDefaults.standard.object(forKey: "budget") as? Int ?? 300
   private var polling: Task<Void, Never>?
@@ -32,16 +63,19 @@ final class PocketStore {
   var projectJobs: [AgentJob] {
     jobs.filter { $0.projectId == project?.id && $0.branch == project?.branch }
   }
-  var currentJob: AgentJob? { projectJobs.first { $0.id == selectedJobId } ?? projectJobs.first }
+  var currentJob: AgentJob? {
+    newConversation ? nil : (projectJobs.first { $0.id == selectedJobId } ?? projectJobs.first)
+  }
   var api: PocketAPI {
     get throws {
-      guard let url = URL(string: apiURL), let host = url.host else {
+      guard let url = URL(string: apiURL), url.host != nil else {
         throw APIError.insecureEndpoint
       }
-      if demoMode && !["localhost", "127.0.0.1", "::1"].contains(host) {
-        throw APIError.insecureEndpoint
-      }
-      return try PocketAPI(baseURL: url)
+      #if DEBUG
+        return try PocketAPI(baseURL: url, allowDevelopmentNetwork: demoMode)
+      #else
+        return try PocketAPI(baseURL: url)
+      #endif
     }
   }
   private func token() async throws -> String {
@@ -59,19 +93,31 @@ final class PocketStore {
       async let m: [AgentModel] = client.get("models", token: token)
       async let c: APIConfiguration = client.get("config", token: token)
       (projects, jobs, models, configuration) = try await (p, j, m, c)
+      connectionError = nil
       selectedProjectId = project?.id
       if !models.contains(where: { $0.id == modelId }) { modelId = models.first?.id ?? "auto" }
       await loadSaves()
+      if !demoMode && projects.isEmpty { await syncRepositories() }
       startPolling()
+    } catch APIError.unreachable(let endpoint) {
+      connectionError = "API unavailable: \(endpoint)"
     } catch { self.error = error.localizedDescription }
   }
   func select(_ project: Project) {
     selectedProjectId = project.id
     selectedJobId = nil
     UserDefaults.standard.set(project.id, forKey: "selectedProjectId")
-    Task { await loadSaves() }
+    Task {
+      await loadSaves()
+      guard !demoMode else { return }
+      do {
+        let branches: [String] = try await api.get("projects/\(project.id)/branches", token: token())
+        if let index = projects.firstIndex(where: { $0.id == project.id }) { projects[index].branches = branches }
+      } catch { self.error = error.localizedDescription }
+    }
   }
   func selectJob(_ job: AgentJob, tab: Tab) {
+    newConversation = false
     selectedProjectId = job.projectId
     selectedJobId = job.id
     branch(job.branch)
@@ -94,6 +140,7 @@ final class PocketStore {
         projectId: project.id, branch: project.branch, prompt: draft, modelId: modelId,
         maxCostCents: maxCostCents)
       let job: AgentJob = try await api.post("jobs", body: request, token: token)
+      newConversation = false
       jobs.insert(job, at: 0)
       selectedJobId = job.id
       draft = ""
@@ -106,6 +153,22 @@ final class PocketStore {
       let updated: AgentJob = try await api.post(
         "jobs/\(job.id)/cancel", body: [String: String](), token: token())
       if let index = jobs.firstIndex(where: { $0.id == job.id }) { jobs[index] = updated }
+    } catch { self.error = error.localizedDescription }
+  }
+  func deleteActivity(_ job: AgentJob) async {
+    struct Result: Decodable, Sendable { let deleted: Bool }
+    do {
+      let _: Result = try await api.delete("jobs/\(job.id)", token: token())
+      jobs.removeAll { $0.id == job.id }
+      if selectedJobId == job.id { selectedJobId = nil; newConversation = true }
+    } catch { self.error = error.localizedDescription }
+  }
+  func deleteCheckpoint(_ save: PocketSave) async {
+    struct Result: Decodable, Sendable { let deleted: Bool }
+    do {
+      let _: Result = try await api.delete("projects/\(save.projectId)/saves/\(save.id)", token: token())
+      saves.removeAll { $0.id == save.id }
+      await load()
     } catch { self.error = error.localizedDescription }
   }
   func loadSaves() async {
@@ -155,11 +218,33 @@ final class PocketStore {
     }
   }
   func signIn() async {
+    guard !isSigningIn else { return }
+    isSigningIn = true
+    defer { isSigningIn = false }
     do {
       try await auth.signIn()
-      demoMode = false
-      UserDefaults.standard.set(false, forKey: "demoMode")
-      await load()
+      tab = .chat
+      // Identity sign-in works independently of the demo API. Never expose real
+      // account tokens to the development HTTP endpoint.
+
+    } catch let failure as ASWebAuthenticationSessionError where failure.code == .canceledLogin {
+      // Closing the browser leaves the current account unchanged.
+    } catch { self.error = error.localizedDescription }
+  }
+  var isConnectingGitHub = false
+  func chooseRepositories() async {
+    guard !isConnectingGitHub,
+      let address = configuration?.githubAppUrl, let url = URL(string: address),
+      url.scheme == "https", url.host == "github.com" else { return }
+    isConnectingGitHub = true
+    defer { isConnectingGitHub = false }
+    do {
+      try await auth.authorizeGitHubApp(url)
+      await loadInstallations()
+      for installation in installations { await connect(installationId: installation.id) }
+    } catch let failure as ASWebAuthenticationSessionError where failure.code == .canceledLogin {
+      await loadInstallations()
+      for installation in installations { await connect(installationId: installation.id) }
     } catch { self.error = error.localizedDescription }
   }
   func authorizeGitHub() async {
@@ -170,18 +255,56 @@ final class PocketStore {
         throw AuthFailure.rejected
       }
       try await auth.authorizeGitHubApp(url)
-      notice = "Pocket GitHub App authorized. You can now sync your installation."
+      await loadInstallations()
+      for installation in installations { await connect(installationId: installation.id) }
+
+    } catch let failure as ASWebAuthenticationSessionError where failure.code == .canceledLogin {
+      // Closing authorization leaves repository access unchanged.
     } catch { self.error = error.localizedDescription }
   }
+  func syncRepositories() async {
+    guard !isDiscoveringRepositories else { return }
+    if !signedIn { await signIn(); return }
+    if demoMode { showSettings = true; return }
+    isDiscoveringRepositories = true
+    defer { isDiscoveringRepositories = false }
+    await loadInstallations()
+    guard repositoryError == nil else { return }
+    if installations.isEmpty { showSettings = true; return }
+    for installation in installations {
+      await connect(installationId: installation.id)
+      if repositoryError != nil { break }
+    }
+  }
+  func loadInstallations() async {
+    guard signedIn && !demoMode else { return }
+    do {
+      installations = try await api.get("github/installations", token: token())
+      repositoryError = nil
+    } catch APIError.server(let status, _) where status == 401 {
+      installations = []
+      repositoryError = "Sign in again to refresh GitHub access."
+      self.error = repositoryError
+    } catch {
+      repositoryError = "Couldn't refresh GitHub access. Try again."
+      self.error = error.localizedDescription
+    }
+  }
   func connect(installationId: Int) async {
+    guard !isSyncing else { return }
+    isSyncing = true
+    defer { isSyncing = false }
     struct Connect: Encodable, Sendable { let installationId: Int }
     do {
       projects = try await api.post(
         "github/connect", body: Connect(installationId: installationId),
         token: token())
       selectedProjectId = project?.id
-      notice = "Your authorized repositories are connected."
-    } catch { self.error = error.localizedDescription }
+      repositoryError = nil
+    } catch {
+      repositoryError = "Couldn't sync your repositories. Try again."
+      self.error = error.localizedDescription
+    }
   }
   func signOut() async {
     stopPolling()
@@ -191,6 +314,9 @@ final class PocketStore {
     saves = []
     selectedJobId = nil
     configuration = nil
+    installations = []
+    demoEntered = false
+    connectionError = nil
   }
   func savePreferences() {
     UserDefaults.standard.set(apiURL, forKey: "apiURL")
