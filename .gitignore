@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.data/
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.DS_Store
+coverage/
+
+test-results/
+playwright-report/

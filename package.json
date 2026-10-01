@@ -1,0 +1,24 @@
+{
+  "name": "pocket",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @pocket/api",
+    "build": "npm run build -w @pocket/api",
+    "test": "npm run test -w @pocket/api",
+    "check": "npm run build && npm test",
+    "test:preview": "playwright test",
+    "format": "prettier --write apps/api apps/preview tests playwright.config.ts docs README.md infra/dispatcher/worker.js",
+    "format:check": "prettier --check apps/api apps/preview tests playwright.config.ts docs README.md infra/dispatcher/worker.js"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "prettier": "^3.9.9"
+  }
+}

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f8f9f6" />
+    <title>Pocket — Ship from anywhere.</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#projects"
+          ><span class="pocket-mark"></span>Pocket<span class="brand-dot"></span
+        ></a>
+        <div class="workspace-label">YOUR WORKSPACE</div>
+        <nav id="desktop-nav" aria-label="Main navigation"></nav>
+        <div class="sidebar-bottom">
+          <div class="connection"><span class="status-dot"></span>Local demo <span>↗</span></div>
+          <div class="profile">
+            <div class="avatar">E</div>
+            <div><strong>Edouard</strong><small>Personal workspace</small></div>
+            <span class="profile-chevron">⌘</span>
+          </div>
+        </div>
+      </aside>
+      <main>
+        <header class="topbar">
+          <div class="breadcrumbs">
+            <span>Pocket</span><span class="slash">/</span><strong id="breadcrumb">Projects</strong>
+          </div>
+          <div class="topbar-right">
+            <span class="demo-label">DEMO WORKSPACE</span
+            ><button class="icon-button" id="settings-shortcut" aria-label="Open settings"></button>
+          </div>
+        </header>
+        <div id="content" aria-live="polite"></div>
+        <footer class="desktop-footer">
+          <span><span class="status-dot"></span>All systems quiet.</span
+          ><span>Your next idea is one message away.</span>
+        </footer>
+      </main>
+      <aside class="context-panel" id="context"></aside>
+      <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation"></nav>
+    </div>
+    <div class="toast" role="status" id="toast" hidden></div>
+    <dialog id="dialog">
+      <form method="dialog">
+        <button class="dialog-close" aria-label="Close">×</button>
+        <div id="dialog-content"></div>
+      </form>
+    </dialog>
+  </body>
+</html>

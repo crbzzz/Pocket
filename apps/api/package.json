@@ -1,0 +1,27 @@
+{
+  "name": "@pocket/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc --noEmit",
+    "start": "tsx src/main.ts",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@daytona/sdk": "^0.220.0",
+    "@electric-sql/pglite": "^0.3.14",
+    "@fastify/rate-limit": "^10.3.0",
+    "@supabase/supabase-js": "^2.117.2",
+    "fastify": "^5.6.0",
+    "pg": "^8.16.3",
+    "tsx": "^4.23.15",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/pg": "^8.15.5",
+    "typescript": "^5.9.2"
+  }
+}

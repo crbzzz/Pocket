@@ -1,0 +1,8 @@
+{
+  "name": "pocket-dispatcher",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": { "POCKET_API_URL": "https://YOUR_SERVICE.run.app", "SUPABASE_URL": "https://YOUR_PROJECT.supabase.co" }
+  // Set SUPABASE_SERVICE_ROLE_KEY and WORKER_DISPATCH_SECRET with wrangler secret put.
+}
