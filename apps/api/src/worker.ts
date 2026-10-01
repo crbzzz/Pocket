@@ -195,6 +195,7 @@ export default {
       const worker = new AgentWorker(new Store(db), false, {
         sandbox: new DaytonaProvider(),
         git: new GitHubApp(),
+        repository: new GitHubApp(),
         storage: new SupabaseCheckpoints(),
         router: new ModelRouter(),
       });

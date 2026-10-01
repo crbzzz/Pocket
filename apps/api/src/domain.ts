@@ -60,6 +60,7 @@ export interface Report {
   costCents: number;
 }
 export interface Job {
+  intent?: 'analysis' | 'change';
   id: string;
   projectId: string;
   branch: string;

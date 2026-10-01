@@ -55,6 +55,7 @@ final class PocketStore {
   var notifications = UserDefaults.standard.bool(forKey: "notifications")
   var maxCostCents = UserDefaults.standard.object(forKey: "budget") as? Int ?? 300
   private var polling: Task<Void, Never>?
+  @ObservationIgnored private var executionTasks: [String: Task<Void, Never>] = [:]
   private var refreshing = false
   let auth = PocketAuth()
   private let realtime = PocketRealtime()
@@ -101,7 +102,7 @@ final class PocketStore {
       startPolling()
     } catch APIError.unreachable(let endpoint) {
       connectionError = "API unavailable: \(endpoint)"
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   func select(_ project: Project) {
     selectedProjectId = project.id
@@ -111,9 +112,12 @@ final class PocketStore {
       await loadSaves()
       guard !demoMode else { return }
       do {
-        let branches: [String] = try await api.get("projects/\(project.id)/branches", token: token())
-        if let index = projects.firstIndex(where: { $0.id == project.id }) { projects[index].branches = branches }
-      } catch { self.error = error.localizedDescription }
+        let branches: [String] = try await api.get(
+          "projects/\(project.id)/branches", token: token())
+        if let index = projects.firstIndex(where: { $0.id == project.id }) {
+          projects[index].branches = branches
+        }
+      } catch { report(error) }
     }
   }
   func selectJob(_ job: AgentJob, tab: Tab) {
@@ -146,30 +150,34 @@ final class PocketStore {
       draft = ""
       tab = .chat
       startPolling()
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   func cancel(_ job: AgentJob) async {
     do {
       let updated: AgentJob = try await api.post(
         "jobs/\(job.id)/cancel", body: [String: String](), token: token())
       if let index = jobs.firstIndex(where: { $0.id == job.id }) { jobs[index] = updated }
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   func deleteActivity(_ job: AgentJob) async {
     struct Result: Decodable, Sendable { let deleted: Bool }
     do {
       let _: Result = try await api.delete("jobs/\(job.id)", token: token())
       jobs.removeAll { $0.id == job.id }
-      if selectedJobId == job.id { selectedJobId = nil; newConversation = true }
-    } catch { self.error = error.localizedDescription }
+      if selectedJobId == job.id {
+        selectedJobId = nil
+        newConversation = true
+      }
+    } catch { report(error) }
   }
   func deleteCheckpoint(_ save: PocketSave) async {
     struct Result: Decodable, Sendable { let deleted: Bool }
     do {
-      let _: Result = try await api.delete("projects/\(save.projectId)/saves/\(save.id)", token: token())
+      let _: Result = try await api.delete(
+        "projects/\(save.projectId)/saves/\(save.id)", token: token())
       saves.removeAll { $0.id == save.id }
       await load()
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   func loadSaves() async {
     guard let project else {
@@ -180,7 +188,7 @@ final class PocketStore {
       let result: [PocketSave] = try await api.get("projects/\(project.id)/saves", token: token())
       if self.project?.id == project.id { saves = result }
     } catch {
-      self.error = error.localizedDescription
+      report(error)
     }
   }
   func loadDiff() async {
@@ -188,7 +196,7 @@ final class PocketStore {
     do {
       let full: AgentJob = try await api.get("jobs/\(job.id)", token: token())
       if let index = jobs.firstIndex(where: { $0.id == job.id }) { jobs[index] = full }
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   func restore(_ save: PocketSave) async {
     do {
@@ -197,7 +205,7 @@ final class PocketStore {
         body: ["saveId": save.id, "branch": project?.branch ?? "main"], token: token())
       if let index = projects.firstIndex(where: { $0.id == p.id }) { projects[index] = p }
       notice = "Save #\(save.number) selected for your next task."
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   func ship(kind: String, title: String, key: String) async -> ShipResult? {
     guard let job = currentJob else { return nil }
@@ -213,7 +221,7 @@ final class PocketStore {
       notice = result.message ?? "Your branch is ready on GitHub."
       return result
     } catch {
-      self.error = error.localizedDescription
+      report(error)
       return nil
     }
   }
@@ -229,13 +237,14 @@ final class PocketStore {
 
     } catch let failure as ASWebAuthenticationSessionError where failure.code == .canceledLogin {
       // Closing the browser leaves the current account unchanged.
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   var isConnectingGitHub = false
   func chooseRepositories() async {
     guard !isConnectingGitHub,
       let address = configuration?.githubAppUrl, let url = URL(string: address),
-      url.scheme == "https", url.host == "github.com" else { return }
+      url.scheme == "https", url.host == "github.com"
+    else { return }
     isConnectingGitHub = true
     defer { isConnectingGitHub = false }
     do {
@@ -245,7 +254,7 @@ final class PocketStore {
     } catch let failure as ASWebAuthenticationSessionError where failure.code == .canceledLogin {
       await loadInstallations()
       for installation in installations { await connect(installationId: installation.id) }
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   func authorizeGitHub() async {
     struct Link: Decodable, Sendable { let url: String }
@@ -260,17 +269,26 @@ final class PocketStore {
 
     } catch let failure as ASWebAuthenticationSessionError where failure.code == .canceledLogin {
       // Closing authorization leaves repository access unchanged.
-    } catch { self.error = error.localizedDescription }
+    } catch { report(error) }
   }
   func syncRepositories() async {
     guard !isDiscoveringRepositories else { return }
-    if !signedIn { await signIn(); return }
-    if demoMode { showSettings = true; return }
+    if !signedIn {
+      await signIn()
+      return
+    }
+    if demoMode {
+      showSettings = true
+      return
+    }
     isDiscoveringRepositories = true
     defer { isDiscoveringRepositories = false }
     await loadInstallations()
     guard repositoryError == nil else { return }
-    if installations.isEmpty { showSettings = true; return }
+    if installations.isEmpty {
+      showSettings = true
+      return
+    }
     for installation in installations {
       await connect(installationId: installation.id)
       if repositoryError != nil { break }
@@ -287,7 +305,7 @@ final class PocketStore {
       self.error = repositoryError
     } catch {
       repositoryError = "Couldn't refresh GitHub access. Try again."
-      self.error = error.localizedDescription
+      report(error)
     }
   }
   func connect(installationId: Int) async {
@@ -303,7 +321,7 @@ final class PocketStore {
       repositoryError = nil
     } catch {
       repositoryError = "Couldn't sync your repositories. Try again."
-      self.error = error.localizedDescription
+      report(error)
     }
   }
   func signOut() async {
@@ -335,7 +353,33 @@ final class PocketStore {
     }
     UserDefaults.standard.set(notifications, forKey: "notifications")
   }
+  private func report(_ failure: Error) {
+    let ns = failure as NSError
+    guard !Task.isCancelled, !(failure is CancellationError),
+      !(ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled)
+    else { return }
+    self.error = failure.localizedDescription
+  }
+  private func startImmediately(_ job: AgentJob) {
+    guard !demoMode, job.status == .queued, executionTasks[job.id] == nil else { return }
+    executionTasks[job.id] = Task { [weak self] in
+      guard let self else { return }
+      defer { self.executionTasks[job.id] = nil }
+      do {
+        let updated = try await self.api.startJob(job.id, token: self.token())
+        let finished =
+          updated.status == .completed
+          && self.jobs.contains { $0.id == updated.id && $0.status.isActive }
+        if let i = self.jobs.firstIndex(where: { $0.id == updated.id }) { self.jobs[i] = updated }
+        if finished { try await self.finishUpdates([updated]) }
+        await self.refresh()
+      } catch {
+        // The persisted queue is still available when immediate execution cannot connect.
+      }
+    }
+  }
   func startPolling() {
+    for job in jobs where job.status == .queued { startImmediately(job) }
     if !demoMode && jobs.contains(where: { $0.status.isActive }) && !realtime.connected {
       Task { await connectRealtime() }
     }
@@ -366,6 +410,21 @@ final class PocketStore {
     polling = nil
     realtime.stop()
   }
+  private func finishUpdates(_ finished: [AgentJob]) async throws {
+    if finished.contains(where: { $0.report?.checkpointAvailable != false }) {
+      await loadSaves()
+      projects = try await api.get("projects", token: token())
+    }
+    if notifications, let job = finished.first {
+      let content = UNMutableNotificationContent()
+      content.title = "Pocket finished your task."
+      content.body =
+        job.intent == "analysis" ? "Your answer is ready." : "Your changes are ready to review."
+      content.sound = .default
+      try? await UNUserNotificationCenter.current().add(
+        UNNotificationRequest(identifier: job.id, content: content, trigger: nil))
+    }
+  }
   private func refresh() async {
     guard !refreshing, !isLoading, demoMode || signedIn else { return }
     refreshing = true
@@ -384,20 +443,9 @@ final class PocketStore {
         return job
       }
       if !jobs.contains(where: { $0.status.isActive }) { realtime.stop() }
-      if !finished.isEmpty {
-        await loadSaves()
-        projects = try await api.get("projects", token: token())
-        if notifications {
-          let content = UNMutableNotificationContent()
-          content.title = "Pocket finished your task."
-          content.body = "Your changes are ready to review."
-          content.sound = .default
-          try? await UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: finished[0].id, content: content, trigger: nil))
-        }
-      }
+      if !finished.isEmpty { try await finishUpdates(finished) }
     } catch {
-      if jobs.contains(where: { $0.status.isActive }) { self.error = error.localizedDescription }
+      if jobs.contains(where: { $0.status.isActive }) { report(error) }
     }
   }
 }

@@ -1,6 +1,6 @@
 # Pocket architecture
 
-The iPhone delegates and reviews. All repository execution happens remotely. A sleeping phone or an offline developer laptop never owns the job.
+The iPhone delegates and reviews. All repository execution happens remotely. Jobs and checkpoints live in the cloud; the developer laptop is not needed. The foreground app requests immediate execution. Persisted queued work can also be claimed by the cloud schedule.
 
 ```mermaid
 flowchart TD
@@ -8,7 +8,9 @@ flowchart TD
   B --> C[Supabase PostgreSQL]
   C --> Q[PostgreSQL job queue]
   D[Cloudflare minute schedule] -->|Only if queued work exists| W[Agent invocation]
+  B -->|Targeted immediate claim| W
   Q --> W
+  W -->|Read-only published state| G
   W --> S[Daytona ephemeral sandbox]
   S --> G[Authorized GitHub repository]
   W --> L[Credential-filtered LLM router]
@@ -21,13 +23,13 @@ flowchart TD
 
 ## Compute follows work
 
-Users have no permanent VM, container, or sandbox. A claim starts a sandbox; completion/failure/cancellation deletes it. Idle users have only database rows and bounded checkpoint storage. The API runs on Cloudflare Workers. A minute schedule inspects the shared queue and starts one claim per invocation when work exists. Empty queues create neither a SQL socket nor compute. Hyperdrive caps origin connections at five and verifies the Supabase certificate. User count does not allocate environments.
+Users have no permanent VM, container, or sandbox. Implementation and analysis of unpublished drafts allocate a sandbox; completion/failure/cancellation deletes it. Read-only published repository requests use GitHub directly. Idle users have only database rows and bounded checkpoint storage. The API runs on Cloudflare Workers. Simple file existence/count/list, branch, metadata, and exact-file requests execute in the submission request without LLM calls. For other tasks, the native app immediately requests an authenticated, owner-scoped `/v1/jobs/:id/start` claim; execution lasts while that HTTP request stays connected. A minute schedule remains a fallback for queued work and starts one claim per invocation when work exists. Empty queues create neither a SQL socket nor compute. Hyperdrive caps origin connections at five and verifies the Supabase certificate. User count does not allocate environments.
 
 The cloud HTTP transport avoids runtime JavaScript compilation. Local Fastify and cloud routing share all application handlers and authorization rules. Provider-neutral interfaces surround models, sandboxes, GitHub and job claims. No separate fleet or persistent polling process is needed in production.
 
 ## Queue and state
 
-`Store` implements `JobQueue`. Claims use `FOR UPDATE SKIP LOCKED`, a random lease token, a 90-second lease, and five-second heartbeats. Phase changes are fenced by the lease token; cancelled jobs cannot become completed. A user-row lock serializes admission and enforces two active jobs. A project-row lock serializes Save numbering. Completion persists report, Save, branch continuation reference, and memory in one transaction.
+`Store` implements `JobQueue`. Claims use `FOR UPDATE SKIP LOCKED`, a random lease token, a 90-second lease, and five-second heartbeats. Phase changes are fenced by the lease token; cancelled jobs cannot become completed. A user-row lock serializes admission and enforces two active jobs. A project-row lock serializes Save numbering. Anchored bilingual rules recognize clear requests locally; ambiguous requests use the cheapest configured model before allocating a sandbox. Analysis requests expose only list/search/read/finish, return a chat answer, and create no checkpoint. A repository reader pins files to a verified branch commit, caches a bounded blob-only tree in PostgreSQL by commit, reads only requested files, memoizes reads within a task, and samples bounded files for content searches. The cached index is excluded from public project responses. Saved unpublished edits still use the restored sandbox to preserve their state. Implementation requests expose editing and verification tools. Implementation completion persists report, Save, branch continuation reference, and memory in one transaction. Activities can be archived per owner without removing their checkpoints. Checkpoint deletion is owner scoped, blocks while a project has active tasks or a pending publish, clears continuation/publish references, and removes private storage; the minute schedule retries interrupted storage cleanup.
 
 Expired running jobs fail closed. They are not automatically replayed because repository tools and provider requests may have side effects. External shipping is separately idempotent; an ambiguous action requires inspecting its named branch before retrying. The queue can be replaced through the worker’s queue parameter.
 
@@ -49,7 +51,7 @@ Expired running jobs fail closed. They are not automatically replayed because re
 | Changed file bytes     | 1 MB                                             |
 | Git bundle             | 20 MB                                            |
 
-The task timer begins before provider setup. On cancellation or expiry, sandbox deletion starts immediately. Provider cleanup failures are logged; Daytona TTL and immediate deletion on auto-stop are the last fallback. Live-provider behavior still needs verification.
+The task timer begins before provider setup. On cancellation or expiry, sandbox deletion starts immediately. Provider cleanup failures are logged; Daytona TTL and immediate deletion on auto-stop are the last fallback. A deployed file-existence request has been verified to finish without a model call, sandbox or checkpoint; implementation compute still follows its configured limits.
 
 The runner truncates and stops commands with excessive output. Child processes live only inside the sandbox. SDK calls have their own timeouts; deleting compute also terminates in-flight commands. The TTL bounds resources even after process crashes. A hard byte limit for model input is conservatively reserved from UTF-8 size plus framing; actual provider usage is recorded. Providers must honor their output limits. Unknown/malformed responses fail the task.
 

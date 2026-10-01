@@ -4,6 +4,7 @@ import SwiftUI
 struct ProjectsView: View {
   @Environment(PocketStore.self) private var store
   @State private var search = ""
+  @State private var creating = false
   private var filtered: [Project] {
     store.projects.filter {
       search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
@@ -26,9 +27,19 @@ struct ProjectsView: View {
             if store.isSigningIn || store.isDiscoveringRepositories {
               ProgressView()
             } else {
-              Label(store.projects.isEmpty ? "Connect" : "Sync", systemImage: store.projects.isEmpty ? "plus" : "arrow.triangle.2.circlepath")
+              Label(
+                store.projects.isEmpty ? "Connect" : "Sync",
+                systemImage: store.projects.isEmpty ? "plus" : "arrow.triangle.2.circlepath")
             }
-          }.buttonStyle(PocketButtonStyle()).disabled(store.isSigningIn || store.isDiscoveringRepositories)
+          }.buttonStyle(PocketButtonStyle()).disabled(
+            store.isSigningIn || store.isDiscoveringRepositories)
+          Button {
+            creating = true
+          } label: {
+            Image(systemName: "plus")
+          }
+          .buttonStyle(PocketButtonStyle(primary: true))
+          .accessibilityLabel("Create repository").disabled(!store.signedIn || store.demoMode)
         }
         HStack {
           Image(systemName: "magnifyingglass")
@@ -46,15 +57,20 @@ struct ProjectsView: View {
             }.buttonStyle(.plain)
           }
         }
-        if store.isLoading || store.isDiscoveringRepositories { ProgressView().frame(maxWidth: .infinity) }
+        if store.isLoading || store.isDiscoveringRepositories {
+          ProgressView().frame(maxWidth: .infinity)
+        }
         if filtered.isEmpty && !store.isLoading && !store.isDiscoveringRepositories {
           EmptyPocket(
-            symbol: "chevron.left.forwardslash.chevron.right", title: store.repositoryError == nil ? "No repositories" : "Sync interrupted",
+            symbol: "chevron.left.forwardslash.chevron.right",
+            title: store.repositoryError == nil ? "No repositories" : "Sync interrupted",
             detail: search.isEmpty
               ? (store.repositoryError ?? "Connect GitHub to choose your repositories.")
               : "No repositories match your search.")
         }
-        if let recent = store.jobs.first(where: { $0.status == .completed }) {
+        if let recent = store.jobs.first(where: {
+          $0.status == .completed && $0.report?.files.isEmpty == false
+        }) {
           Text("RECENT TASK").font(.system(size: 9, weight: .medium)).tracking(1.5)
             .foregroundStyle(PocketStyle.muted)
           Card {
@@ -79,6 +95,7 @@ struct ProjectsView: View {
 
       }.padding(.horizontal, 24).padding(.top, 26).padding(.bottom, 30)
     }.pocketToolbar().refreshable { await store.load() }
+      .sheet(isPresented: $creating) { CreateRepositoryView() }
   }
 }
 struct ProjectRow: View {

@@ -7,3 +7,4 @@ let package = Package(
   targets: [
     .target(name: "PocketCore"), .testTarget(name: "PocketCoreTests", dependencies: ["PocketCore"]),
   ])
+

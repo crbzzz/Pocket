@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the small, dependency-free app project; PocketCore is a local package."""
+"""Generate the app project with local PocketCore and the MarkdownUI renderer."""
 from pathlib import Path
 from hashlib import sha1
 import subprocess
@@ -25,14 +25,17 @@ obj('app', 'isa = PBXFileReference; explicitFileType = wrapper.application; path
 obj('core-build', f'isa = PBXBuildFile; productRef = {uid("core-product")};')
 obj('core-product', f'isa = XCSwiftPackageProductDependency; package = {uid("core-package")}; productName = PocketCore;')
 obj('core-package', 'isa = XCLocalSwiftPackageReference; relativePath = PocketCore;')
+obj('markdown-package', 'isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui.git"; requirement = {kind = exactVersion; version = 2.4.1; };')
+obj('markdown-product', f'isa = XCSwiftPackageProductDependency; package = {uid("markdown-package")}; productName = MarkdownUI;')
+obj('markdown-build', f'isa = PBXBuildFile; productRef = {uid("markdown-product")};')
 obj('group', f'isa = PBXGroup; children = ({uid("sources-group")},{uid("products-group")}); sourceTree = "<group>";')
 obj('sources-group', f'isa = PBXGroup; children = ({",".join(uid(f.name) for f in files)},{uid("info")},{uid("assets")}); path = Pocket; sourceTree = "<group>";')
 obj('products-group', f'isa = PBXGroup; children = ({uid("app")}); name = Products; sourceTree = "<group>";')
 obj('sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({",".join(uid("build-"+f.name) for f in files)}); runOnlyForDeploymentPostprocessing = 0;')
-obj('frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({uid("core-build")}); runOnlyForDeploymentPostprocessing = 0;')
+obj('frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({uid("core-build")},{uid("markdown-build")}); runOnlyForDeploymentPostprocessing = 0;')
 obj('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({uid("assets-build")}); runOnlyForDeploymentPostprocessing = 0;')
-obj('target', f'isa = PBXNativeTarget; buildConfigurationList = {uid("target-config")}; buildPhases = ({uid("sources")},{uid("frameworks")},{uid("resources")}); buildRules = (); dependencies = (); name = Pocket; packageProductDependencies = ({uid("core-product")}); productName = Pocket; productReference = {uid("app")}; productType = "com.apple.product-type.application";')
-obj('project', f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2700; }}; buildConfigurationList = {uid("project-config")}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base); mainGroup = {uid("group")}; packageReferences = ({uid("core-package")}); productRefGroup = {uid("products-group")}; projectDirPath = ""; projectRoot = ""; targets = ({uid("target")});')
+obj('target', f'isa = PBXNativeTarget; buildConfigurationList = {uid("target-config")}; buildPhases = ({uid("sources")},{uid("frameworks")},{uid("resources")}); buildRules = (); dependencies = (); name = Pocket; packageProductDependencies = ({uid("core-product")},{uid("markdown-product")}); productName = Pocket; productReference = {uid("app")}; productType = "com.apple.product-type.application";')
+obj('project', f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2700; }}; buildConfigurationList = {uid("project-config")}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base); mainGroup = {uid("group")}; packageReferences = ({uid("core-package")},{uid("markdown-package")}); productRefGroup = {uid("products-group")}; projectDirPath = ""; projectRoot = ""; targets = ({uid("target")});')
 for group in ['target','project']:
     obj(group+'-config',f'isa = XCConfigurationList; buildConfigurations = ({uid(group+"-Debug")},{uid(group+"-Release")}); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;')
     for mode in ['Debug','Release']:

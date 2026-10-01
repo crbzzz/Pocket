@@ -1,4 +1,12 @@
 import { createSign } from 'node:crypto';
+import { safePath } from './sandbox.js';
+import type { SQL } from './sql.js';
+import type {
+  RepositoryReaderProvider,
+  RepositoryReader,
+  RepositoryIndex,
+} from './repository-reader.js';
+import type { Project } from './domain.js';
 import { DomainError } from './domain.js';
 export interface Repo {
   id: number;
@@ -30,7 +38,7 @@ export interface GitProvider {
     createPR: boolean,
   ): Promise<{ commit: string; branch: string; url?: string }>;
 }
-export class GitHubApp implements GitProvider {
+export class GitHubApp implements GitProvider, RepositoryReaderProvider {
   private jwt(): string {
     const id = process.env.GITHUB_APP_ID;
     const key = process.env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, '\n');
@@ -55,6 +63,128 @@ export class GitHubApp implements GitProvider {
     });
     if (!r.ok) throw new DomainError(r.status === 404 ? 404 : 502, `GitHub returned ${r.status}`);
     return r.json();
+  }
+  async open(
+    project: Project & { installationId: number; repositoryId: number },
+    branch: string,
+    db: SQL,
+    options: { index?: boolean } = {},
+  ): Promise<RepositoryReader> {
+    const token = await this.readToken(project.installationId, project.repositoryId);
+    const prefix = `/repos/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.name)}`;
+    let head: any;
+    try {
+      head = await this.request(`${prefix}/commits/${encodeURIComponent(branch)}`, token);
+    } catch (e) {
+      if (e instanceof DomainError && e.message === 'GitHub returned 409')
+        return {
+          index: { commit: '', paths: [], truncated: false },
+          list: () => '',
+          read: async () => {
+            throw new DomainError(404, 'File not found');
+          },
+          search: async () => '',
+        };
+      throw e;
+    }
+    const cached = (
+      await db.query("SELECT data->'repositoryIndex' AS cache FROM projects WHERE id=$1", [
+        project.id,
+      ])
+    ).rows[0]?.cache as (RepositoryIndex & { branch: string }) | undefined;
+    let index: RepositoryIndex;
+    if (cached && cached.commit === head.sha && cached.branch === branch) index = cached;
+    else if (options.index === false) index = { commit: head.sha, paths: [], truncated: true };
+    else {
+      const tree = await this.request(
+        `${prefix}/git/trees/${head.commit.tree.sha}?recursive=1`,
+        token,
+      );
+      const all = tree.tree.filter((n: any) => n.type === 'blob').map((n: any) => n.path as string);
+      index = {
+        commit: head.sha,
+        paths: all.slice(0, 5000),
+        truncated: tree.truncated || all.length > 5000,
+      };
+      await db.query(
+        "UPDATE projects SET data=jsonb_set(data,'{repositoryIndex}',$2::jsonb) WHERE id=$1",
+        [project.id, JSON.stringify({ ...index, branch })],
+      );
+    }
+    const files = new Map<string, Promise<string>>();
+    const read = (path: string): Promise<string> => {
+      safePath(path);
+      if (files.has(path)) return files.get(path)!;
+      const promise = (async () => {
+        if (
+          !index.paths.includes(path) &&
+          index.paths.some((p) => p.startsWith(path.replace(/\/$/, '') + '/'))
+        )
+          return JSON.stringify({
+            directory: true,
+            entries: index.paths
+              .filter((p) => p.startsWith(path.replace(/\/$/, '') + '/'))
+              .slice(0, 80),
+          });
+        const data = await this.request(
+          `${prefix}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${index.commit}`,
+          token,
+        );
+        if (Array.isArray(data))
+          return JSON.stringify({
+            directory: true,
+            entries: data.slice(0, 80).map((n) => n.name + (n.type === 'dir' ? '/' : '')),
+          });
+        if (data.type !== 'file' || data.size > 100000 || data.encoding !== 'base64')
+          throw new DomainError(
+            400,
+            'File is unavailable or too large; read a relevant smaller file',
+          );
+        return Buffer.from(data.content, 'base64').toString('utf8');
+      })();
+      files.set(path, promise);
+      return promise;
+    };
+    return {
+      index,
+      list: (path, limit = 80) => {
+        safePath(path);
+        const prefix = path === '.' ? '' : path.replace(/\/$/, '') + '/';
+        return index.paths
+          .filter((p) => !prefix || p === path || p.startsWith(prefix))
+          .slice(0, limit)
+          .join('\n');
+      },
+      read,
+      search: async (query) => {
+        const candidates = index.paths
+          .filter((p) => p.toLowerCase().includes(query.toLowerCase()))
+          .slice(0, 40);
+        if (candidates.length) return candidates.join('\n');
+        const paths = index.paths
+          .filter((p) => /\.(?:md|json|ts|tsx|js|jsx|swift|py|rs|go|yml|yaml|css|html)$/.test(p))
+          .slice(0, 10);
+        const results = await Promise.all(
+          paths.map(async (p) => {
+            try {
+              return (await read(p))
+                .split('\n')
+                .flatMap((line, n) =>
+                  line.includes(query) ? [`${p}:${n + 1}:${line.slice(0, 300)}`] : [],
+                )
+                .slice(0, 8)
+                .join('\n');
+            } catch {
+              return '';
+            }
+          }),
+        );
+        return (
+          results.filter(Boolean).join('\n') ||
+          'No matches in the sampled files. Use the path listing to read relevant files.'
+        );
+      },
+    };
   }
   async assertUserAccess(token: string, name: string): Promise<void> {
     await this.request(`/repos/${name}`, token);

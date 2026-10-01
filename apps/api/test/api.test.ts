@@ -202,6 +202,22 @@ test('activity deletion preserves checkpoints, checkpoint deletion clears restor
   await new AgentWorker(store, true).runOne();
   const save = (await store.saves(demoUser, demoProject)).find((s) => s.jobId === job.id)!;
   assert.ok(save);
+  const otherUser = randomUUID();
+  await db.query('INSERT INTO users(id,name) VALUES($1,$2)', [otherUser, 'Shared member']);
+  await db.query('INSERT INTO memberships(user_id,project_id) VALUES($1,$2)', [
+    otherUser,
+    demoProject,
+  ]);
+  await assert.rejects(
+    () => store.deleteSave(otherUser, demoProject, save.id),
+    /Checkpoint not found/,
+  );
+  await assert.rejects(() => store.deleteJob(otherUser, job.id), /Agent not found/);
+  await db.query('DELETE FROM memberships WHERE user_id=$1', [otherUser]);
+  await db.query('DELETE FROM users WHERE id=$1', [otherUser]);
+  const active = await store.create(demoUser, payload, randomUUID(), true);
+  await assert.rejects(() => store.deleteSave(demoUser, demoProject, save.id), /running tasks/);
+  await store.cancel(demoUser, active.id);
   await assert.rejects(() => store.deleteSave(randomUUID(), demoProject, save.id));
   const deletion = await server.app.inject({
     method: 'DELETE',
@@ -225,6 +241,33 @@ test('activity deletion preserves checkpoints, checkpoint deletion clears restor
     !Object.values((await store.project(demoUser, demoProject)).branchSaves ?? {}).includes(
       save.snapshotRef,
     ),
+  );
+});
+
+test('immediate execution targets only the owned job and concurrent starts cannot duplicate it', async () => {
+  const store = new Store(db);
+  const other = await store.create(demoUser, payload, randomUUID(), true);
+  const target = await store.create(
+    demoUser,
+    { ...payload, prompt: 'Update this target only' },
+    randomUUID(),
+    true,
+  );
+  const start = () =>
+    server.app.inject({ method: 'POST', url: `/v1/jobs/${target.id}/start`, headers });
+  const results = await Promise.all([start(), start()]);
+  for (const result of results) assert.equal(result.statusCode, 200, result.body);
+  assert.equal((await store.job(demoUser, target.id)).status, 'completed');
+  assert.equal((await store.job(demoUser, other.id)).status, 'queued');
+  assert.equal(
+    (await store.saves(demoUser, demoProject)).filter((s) => s.jobId === target.id).length,
+    1,
+  );
+  await store.cancel(demoUser, other.id);
+  assert.equal(
+    (await server.app.inject({ method: 'POST', url: `/v1/jobs/${randomUUID()}/start`, headers }))
+      .statusCode,
+    404,
   );
 });
 

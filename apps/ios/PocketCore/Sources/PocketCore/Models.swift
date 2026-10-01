@@ -84,6 +84,7 @@ public struct AgentReport: Codable, Sendable {
   public var canShip: Bool { checkpointAvailable != false && !files.isEmpty && !checks.contains { $0.status == "failed" } }
 }
 public struct AgentJob: Codable, Identifiable, Sendable {
+  public let intent: String?
   public let id: String
   public let projectId: String
   public let branch: String

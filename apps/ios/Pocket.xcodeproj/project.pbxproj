@@ -7,6 +7,17 @@
 	objects = {
 0652E436F42D75F5672A8BD9 = { isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Pocket.xcconfig; sourceTree = SOURCE_ROOT; };
 
+
+51F152B3E85FEC19801B445B = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui.git"; requirement = {kind = exactVersion; version = 2.4.1; }; };
+DDE7358ED73CB1727DED16B3 = {isa = XCSwiftPackageProductDependency; package = 51F152B3E85FEC19801B445B; productName = MarkdownUI; };
+9B093BE326136CFCB38539DA = {isa = PBXBuildFile; productRef = DDE7358ED73CB1727DED16B3; };
+479714A630484320124FE1C4 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownResponse.swift; sourceTree = "<group>"; };
+ED9AA5629D660C1B68FFCBB6 = {isa = PBXBuildFile; fileRef = 479714A630484320124FE1C4; };
+
+
+A317D40560F7AD1CB73D8C1B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateRepositoryView.swift; sourceTree = "<group>"; };
+4EB7C9CD6C491E8FB022ED58 = {isa = PBXBuildFile; fileRef = A317D40560F7AD1CB73D8C1B; };
+
 /* Begin PBXBuildFile section */
 		1767DDF39B8CDF6342F9906F /* PocketApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDEE954C10CC1C7597EA558 /* PocketApp.swift */; };
 		24DF3286CCD0626638EB6F0C /* Authentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = A82BCA2D9D9852AAF82FA8D5 /* Authentication.swift */; };
@@ -48,6 +59,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D9F82689E8F760ECED47CA3E /* PocketCore in Frameworks */,
+9B093BE326136CFCB38539DA,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,6 +89,8 @@
 				A82BCA2D9D9852AAF82FA8D5 /* Authentication.swift */,
 				8B2DCE8A4441A7E101EDE119 /* ChangesView.swift */,
 				1DF6C62AEDD71DB776AC847D /* ChatView.swift */,
+A317D40560F7AD1CB73D8C1B,
+479714A630484320124FE1C4,
 				9BDEE954C10CC1C7597EA558 /* PocketApp.swift */,
 				7657A93EB382DC8C0BB1542E /* PocketStore.swift */,
 				E3426F4A4BE7CA6773068F9E /* ProjectsView.swift */,
@@ -109,6 +123,7 @@
 			name = Pocket;
 			packageProductDependencies = (
 				8D6A224FA1D1DD751157EB0C /* PocketCore */,
+DDE7358ED73CB1727DED16B3,
 			);
 			productName = Pocket;
 			productReference = 7D1043473D55BFA90E8530D3 /* Pocket.app */;
@@ -134,6 +149,7 @@
 			mainGroup = 64292B1C2B2E13EAD8788FC8;
 			packageReferences = (
 				B747EAD6A8D7189EE159E1E4 /* XCLocalSwiftPackageReference "PocketCore" */,
+51F152B3E85FEC19801B445B,
 			);
 			productRefGroup = 615B463D1028E4E24B674CF7 /* Products */;
 			projectDirPath = "";
@@ -164,6 +180,8 @@
 				24DF3286CCD0626638EB6F0C /* Authentication.swift in Sources */,
 				C3D9C57688E694BA4EE41BA7 /* ChangesView.swift in Sources */,
 				6F85CB2C03F6931DA8B92F7A /* ChatView.swift in Sources */,
+4EB7C9CD6C491E8FB022ED58,
+ED9AA5629D660C1B68FFCBB6,
 				1767DDF39B8CDF6342F9906F /* PocketApp.swift in Sources */,
 				8217A90F5D8629E1B434BA05 /* PocketStore.swift in Sources */,
 				BF385CA7FE5356D84446C663 /* ProjectsView.swift in Sources */,

@@ -10,7 +10,7 @@ import { ModelRouter, type LLMProvider } from '../src/models.js';
 import type { SandboxHandle } from '../src/sandbox.js';
 import type { Checkpoint } from '../src/artifacts.js';
 import type { GitProvider } from '../src/github.js';
-async function harness(actions: unknown[], budget = 300) {
+async function harness(actions: unknown[], budget = 300, intent = 'change') {
   const db = await database();
   await migrate(db);
   await seed(db);
@@ -61,8 +61,10 @@ async function harness(actions: unknown[], budget = 300) {
     ]),
   );
   const llm: LLMProvider = {
-    complete: async () => ({
-      text: JSON.stringify(actions[calls++] ?? { kind: 'run', command: 'true' }),
+    complete: async (_model, _system, _messages, _max, _signal, actionMode) => ({
+      text: !actionMode
+        ? JSON.stringify({ intent })
+        : JSON.stringify(actions[calls++] ?? { kind: 'run', command: 'true' }),
       inputTokens: 100,
       outputTokens: 20,
     }),
@@ -95,7 +97,8 @@ async function harness(actions: unknown[], budget = 300) {
     {
       projectId: demoProject,
       branch: 'main',
-      prompt: 'Update one value, run tests, do not push.',
+      prompt:
+        intent === 'analysis' ? 'résume le repo' : 'Update one value, run tests, do not push.',
       modelId: 'test',
       maxCostCents: budget,
     },
@@ -193,5 +196,57 @@ test('unavailable reads are returned to the model, allowing a summary to complet
     assert.equal(h.stats().deleted, 1);
   } finally {
     await h.db.close();
+  }
+});
+
+test('analysis is classified first, disables writes, and completes without creating checkpoints', async () => {
+  const h = await harness(
+    [
+      { kind: 'write', path: 'app.ts', content: 'forbidden' },
+      { kind: 'read', path: 'README.md' },
+      { kind: 'finish', summary: 'Repository summary.' },
+    ],
+    300,
+    'analysis',
+  );
+  try {
+    await h.worker.runOne();
+    const job = await h.store.job(demoUser, h.job.id);
+    assert.equal(job.intent, 'analysis');
+    assert.equal(job.status, 'completed');
+    assert.equal(job.report?.checkpointAvailable, false);
+    assert.equal(h.stats().writes, 0);
+    assert.equal(h.stats().stored, 0);
+    assert.equal(
+      (await h.store.saves(demoUser, demoProject)).filter((s) => s.jobId === h.job.id).length,
+      0,
+    );
+  } finally {
+    await h.db.close();
+  }
+});
+
+test('large file results stay compact on the free profile and leave room to answer', async () => {
+  const previous = process.env.POCKET_AGENT_PROFILE;
+  process.env.POCKET_AGENT_PROFILE = 'free';
+  const h = await harness(
+    [
+      { kind: 'read', path: 'README.md' },
+      { kind: 'read', path: 'package.json' },
+      { kind: 'read', path: 'app.ts' },
+      { kind: 'finish', summary: 'A useful summary.' },
+    ],
+    300,
+    'analysis',
+  );
+  h.handle.read = async () => 'Repository context '.repeat(2000);
+  try {
+    await h.worker.runOne();
+    assert.equal((await h.store.job(demoUser, h.job.id)).status, 'completed');
+    assert.equal(h.stats().stored, 0);
+  } finally {
+    await h.db.close();
+    if (previous === undefined) delete process.env.POCKET_AGENT_PROFILE;
+    else process.env.POCKET_AGENT_PROFILE = previous;
   }
 });

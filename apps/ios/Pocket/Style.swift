@@ -2,20 +2,30 @@ import SwiftUI
 import UIKit
 
 enum PocketStyle {
-  static let paper = Color(uiColor: .systemBackground)
-  static let card = Color(uiColor: .secondarySystemBackground)
-  static let soft = Color(uiColor: .tertiarySystemFill)
-  static let ink = Color.primary
-  static let muted = Color.secondary
-  static let line = Color(uiColor: .separator).opacity(0.35)
-  static let accent = Color.primary
-  static let highlight = Color.primary
-  static let success = Color(uiColor: .systemGreen)
-  static let red = Color(uiColor: .systemRed)
+  private static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
+    func color(_ hex: UInt32) -> UIColor {
+      UIColor(
+        red: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255,
+        blue: CGFloat(hex & 255) / 255, alpha: 1)
+    }
+    return Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? color(dark) : color(light) })
+  }
+  static let paper = adaptive(0xF5F7F8, 0x101419)
+  static let card = adaptive(0xFFFFFF, 0x1B222B)
+  static let soft = adaptive(0xE7EDF0, 0x27323D)
+  static let ink = adaptive(0x18232C, 0xEDF2F5)
+  static let muted = adaptive(0x5D6D79, 0xA0AFBD)
+  static let line = adaptive(0xD8E1E5, 0x35424E)
+  static let accent = adaptive(0x146C60, 0x9AE5CE)
+  static let highlight = accent
+  static let success = accent
+  static let red = adaptive(0xBA3D44, 0xFF969C)
 }
+
 extension Color {
   init(hex: UInt32) {
-    self.init(.sRGB, red: Double((hex >> 16) & 255) / 255,
+    self.init(
+      .sRGB, red: Double((hex >> 16) & 255) / 255,
       green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, opacity: 1)
   }
 }
@@ -59,7 +69,7 @@ struct PocketButtonStyle: ButtonStyle {
     configuration.label.font(.subheadline.weight(.semibold))
       .padding(.horizontal, 16).padding(.vertical, 12)
       .foregroundStyle(primary ? PocketStyle.paper : PocketStyle.ink)
-      .background(primary ? PocketStyle.ink : PocketStyle.soft, in: Capsule())
+      .background(primary ? PocketStyle.accent : PocketStyle.soft, in: Capsule())
       .opacity(configuration.isPressed ? 0.7 : 1)
       .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: configuration.isPressed)
   }
@@ -71,12 +81,15 @@ struct EmptyPocket: View {
   var body: some View {
     ContentUnavailableView {
       Label(title, systemImage: symbol)
-    } description: { if !detail.isEmpty { Text(detail) } }
+    } description: {
+      if !detail.isEmpty { Text(detail) }
+    }
   }
 }
 func timeAgo(_ value: String) -> String {
   let parser = ISO8601DateFormatter()
   parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
   guard let date = parser.date(from: value) else { return "Recently" }
+  if date.timeIntervalSinceNow > -60 { return "Just now" }
   return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
 }

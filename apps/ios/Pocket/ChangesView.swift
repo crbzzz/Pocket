@@ -45,7 +45,7 @@ struct ChangesView: View {
               store.draft = "Please adjust the previous changes: "
               store.tab = .chat
             }
-            Button("View Save") { store.tab = .saves }
+            if report.checkpointAvailable != false { Button("View checkpoint") { store.tab = .saves } }
           }.font(.system(size: 11)).padding(.vertical, 5)
         } else {
           EmptyPocket(

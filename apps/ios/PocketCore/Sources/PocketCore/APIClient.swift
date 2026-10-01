@@ -49,14 +49,19 @@ public struct PocketAPI: Sendable {
     try await request(
       path, token: token, body: JSONEncoder().encode(body), idempotencyKey: idempotencyKey)
   }
+  public func startJob(_ id: String, token: String) async throws -> AgentJob {
+    try await request(
+      "jobs/\(id)/start", token: token, body: Data("{}".utf8), idempotencyKey: nil, timeout: 240)
+  }
   public func delete<T: Decodable & Sendable>(_ path: String, token: String) async throws -> T {
     try await request(path, token: token, body: nil, idempotencyKey: nil, method: "DELETE")
   }
   private func request<T: Decodable & Sendable>(
-    _ path: String, token: String, body: Data?, idempotencyKey: String?, method: String? = nil
+    _ path: String, token: String, body: Data?, idempotencyKey: String?, method: String? = nil,
+    timeout: TimeInterval = 35
   ) async throws -> T {
     var request = URLRequest(url: baseURL.appendingPathComponent("v1").appendingPathComponent(path))
-    request.timeoutInterval = 35
+    request.timeoutInterval = timeout
     request.httpMethod = method ?? (body == nil ? "GET" : "POST")
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     if let body {
@@ -68,6 +73,8 @@ public struct PocketAPI: Sendable {
     let response: URLResponse
     do {
       (data, response) = try await session.data(for: request)
+    } catch let error as URLError where error.code == .cancelled {
+      throw CancellationError()
     } catch let error as URLError
       where [.cannotConnectToHost, .cannotFindHost, .notConnectedToInternet, .timedOut].contains(
         error.code)

@@ -15,7 +15,7 @@ struct ChatView: View {
             ForEach(store.projects) { p in Button(p.name) { store.select(p) } }
           } label: {
             Label(project.name, systemImage: "chevron.left.forwardslash.chevron.right")
-              .font(.system(size: 13, weight: .semibold))
+              .font(.subheadline.weight(.semibold))
           }
           Menu {
             ForEach(project.branches, id: \.self) { branch in
@@ -23,7 +23,7 @@ struct ChatView: View {
             }
           } label: {
             Label(project.branch, systemImage: "arrow.triangle.branch")
-              .font(.system(size: 11)).foregroundStyle(PocketStyle.muted)
+              .font(.subheadline).foregroundStyle(PocketStyle.muted)
           }
         } else {
           Button("Choose a repository") { store.tab = .projects }.font(
@@ -79,11 +79,25 @@ struct ChatView: View {
                     Text(timeAgo(job.updatedAt)).font(.system(size: 10)).foregroundStyle(
                       PocketStyle.muted)
                   }
-                  if let summary = job.report?.summary ?? job.error {
-                    Text(.init(summary)).font(.body).lineSpacing(4).textSelection(.enabled)
-                      .foregroundStyle(PocketStyle.ink.opacity(0.9))
+                  if let summary = job.report?.summary {
+                    MarkdownResponse(content: summary)
+                  } else if let error = job.error {
+                    Text(error).font(.body).lineSpacing(4).textSelection(.enabled)
+                      .foregroundStyle(PocketStyle.ink)
                   }
-                  if (job.id == store.currentJob?.id || job.status.isActive) && (job.status != .completed || job.report?.files.isEmpty == false) {
+                  if job.status.isActive && job.intent != "change" {
+                    HStack(spacing: 10) {
+                      ProgressView().controlSize(.small).tint(PocketStyle.accent)
+                      Text(job.intent == "analysis" ? "Reading your repository…" : "Understanding your request…")
+                        .font(.subheadline).foregroundStyle(PocketStyle.muted)
+                      Spacer()
+                      Button { Task { await store.cancel(job) } } label: { Image(systemName: "stop.circle") }
+                        .accessibilityLabel("Stop response")
+                    }
+                  } else if job.status == .failed && job.intent != "change" {
+                    Button("Try again", systemImage: "arrow.clockwise") { store.draft = job.prompt; composing = true }
+                      .font(.subheadline).foregroundStyle(PocketStyle.accent)
+                  } else if (job.id == store.currentJob?.id || job.status.isActive) && (job.intent == "change" || job.demo || job.report?.files.isEmpty == false) && (job.status != .completed || job.report?.files.isEmpty == false) {
                     JobCard(job: job)
                   } else if job.report?.files.isEmpty == false {
                     Button("Review changes") { store.selectJob(job, tab: .changes) }
@@ -152,8 +166,9 @@ struct ChatView: View {
             .accessibilityLabel("Send task")
           }
         }.padding(17).background(PocketStyle.card, in: RoundedRectangle(cornerRadius: 21))
+          .overlay(RoundedRectangle(cornerRadius: 21).stroke(PocketStyle.line.opacity(0.6), lineWidth: 0.5))
 
-          .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 3)
+          .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 2)
       }.background(PocketStyle.paper)
     }
     .onChange(of: composing) { _, value in store.isComposing = value }

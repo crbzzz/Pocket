@@ -14,7 +14,9 @@ import { seed } from './seed.js';
 import { ModelRouter } from './models.js';
 import { GitHubApp } from './github.js';
 import { SupabaseCheckpoints } from './artifacts.js';
-import { limits } from './agent.js';
+import { DaytonaProvider } from './sandbox.js';
+import { quickRequest } from './quick-requests.js';
+import { AgentWorker, limits } from './agent.js';
 import { GitHubAuthorization } from './github-oauth.js';
 export async function createServer(
   db: SQL,
@@ -203,6 +205,30 @@ export async function createServer(
     },
   );
   app.get('/v1/jobs', (req) => store.jobs(req.userId));
+  const executeJob = async (user: string, id: string) => {
+    const current = await store.job(user, id);
+    if (current.status === 'queued') {
+      const github = new GitHubApp();
+      const worker = new AgentWorker(
+        store,
+        demo,
+        demo
+          ? undefined
+          : {
+              sandbox: { create: (...args) => new DaytonaProvider().create(...args) },
+              git: github,
+              repository: github,
+              storage: new SupabaseCheckpoints(),
+              router,
+            },
+      );
+      await worker.runOne(AbortSignal.timeout(limits.runtimeMs + 5000), id);
+    }
+    return store.job(user, id);
+  };
+  app.post<{ Params: { id: string } }>('/v1/jobs/:id/start', (req) =>
+    executeJob(req.userId, z.uuid().parse(req.params.id)),
+  );
   app.post('/v1/jobs', async (req, reply) => {
     const input = taskInput.parse(req.body);
     const key = z.string().min(8).max(100).parse(req.headers['idempotency-key']);
@@ -212,6 +238,9 @@ export async function createServer(
       await repositoryAccess(req, project as typeof project & { installationId: number });
     }
     const job = await store.create(req.userId, input, key, demo);
+    if (!demo && quickRequest(input.prompt) && job.status === 'queued') {
+      return reply.code(200).send(await executeJob(req.userId, job.id));
+    }
     return reply.code(202).send(job);
   });
   app.get<{ Params: { id: string } }>('/v1/jobs/:id', (req) =>

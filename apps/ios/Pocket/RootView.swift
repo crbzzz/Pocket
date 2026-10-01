@@ -34,7 +34,10 @@ struct RootView: View {
       }
     }
       .task(id: "\(store.signedIn)-\(store.demoEntered)") {
-        if store.signedIn || store.demoEntered { await store.load() }
+        if store.signedIn || store.demoEntered {
+          await store.load()
+          await store.auth.refreshProfileIfNeeded()
+        }
       }
       .sheet(isPresented: $store.showSettings) { NavigationStack { SettingsView() } }
       .alert(
@@ -55,29 +58,27 @@ struct RootView: View {
       }
   }
   private var workspace: some View {
-    TabView(selection: Binding(
-      get: { isActivity ? PocketStore.Tab.agents : store.tab },
-      set: { store.tab = $0 }
-    )) {
-      NavigationStack { ChatView() }
-        .tabItem { Label("Chat", systemImage: "bubble.left") }.tag(PocketStore.Tab.chat)
-      NavigationStack { ProjectsView() }
-        .tabItem { Label("Repositories", systemImage: "folder") }.tag(PocketStore.Tab.projects)
-      NavigationStack {
-        VStack(spacing: 0) {
-          Picker("Activity", selection: Binding(get: { store.tab }, set: { store.tab = $0 })) {
-            Text("Tasks").tag(PocketStore.Tab.agents)
-            Text("Changes").tag(PocketStore.Tab.changes)
-            Text("Checkpoints").tag(PocketStore.Tab.saves)
-          }.pickerStyle(.segmented).padding(.horizontal, 20).padding(.vertical, 8)
-          switch store.tab {
-          case .changes: ChangesView()
-          case .saves: SavesView()
-          default: AgentsView()
+    NavigationStack {
+      Group {
+        switch store.tab {
+        case .projects: ProjectsView()
+        case .agents, .changes, .saves:
+          VStack(spacing: 0) {
+            Picker("Activity", selection: Binding(get: { store.tab }, set: { store.tab = $0 })) {
+              Text("Tasks").tag(PocketStore.Tab.agents)
+              Text("Changes").tag(PocketStore.Tab.changes)
+              Text("Checkpoints").tag(PocketStore.Tab.saves)
+            }.pickerStyle(.segmented).padding(.horizontal, 20).padding(.vertical, 12)
+            switch store.tab {
+            case .changes: ChangesView()
+            case .saves: SavesView()
+            default: AgentsView()
+            }
           }
+        default: ChatView()
         }
-      }.tabItem { Label("Activity", systemImage: "clock") }.tag(PocketStore.Tab.agents)
-    }.tint(PocketStyle.ink)
+      }
+    }.tint(PocketStyle.accent)
       .safeAreaInset(edge: .top, spacing: 0) {
         if store.connectionError != nil {
           HStack {
@@ -98,10 +99,34 @@ struct PocketToolbar: ViewModifier {
     content.navigationBarTitleDisplayMode(.inline).background(PocketStyle.paper)
       .toolbarBackground(PocketStyle.paper, for: .navigationBar)
       .toolbar {
+        ToolbarItem(placement: .topBarLeading) {
+          Menu {
+            Button { store.tab = .chat } label: { Label("Chat", systemImage: "bubble.left") }
+            Button { store.tab = .projects } label: { Label("Repositories", systemImage: "folder") }
+            Button { store.tab = .agents } label: { Label("Activity", systemImage: "clock") }
+          } label: {
+            HStack(spacing: 7) {
+              Image(systemName: "line.3.horizontal")
+              Text(store.tab == .projects ? "Repositories" : [.agents, .changes, .saves].contains(store.tab) ? "Activity" : "Chat")
+                .font(.subheadline.weight(.semibold))
+              Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+            }.foregroundStyle(PocketStyle.ink).fixedSize()
+          }.accessibilityLabel("Navigate Pocket")
+        }
         ToolbarItem(placement: .topBarTrailing) {
           if store.signedIn {
             Button { store.showSettings = true } label: {
-              Image(systemName: "person.crop.circle").font(.system(size: 22))
+              AsyncImage(url: store.auth.session?.user?.avatarURL) { image in
+                image.resizable().scaledToFill()
+              } placeholder: {
+                Image(systemName: "person.crop.circle").resizable().scaledToFit()
+                  .foregroundStyle(PocketStyle.muted).padding(3)
+              }
+              .frame(width: 32, height: 32)
+              .background(PocketStyle.card)
+              .clipShape(Circle())
+              .overlay(Circle().stroke(PocketStyle.line, lineWidth: 0.75))
+              .frame(width: 44, height: 44)
             }.accessibilityLabel("Account and settings")
           } else {
             Button {

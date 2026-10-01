@@ -15,14 +15,14 @@ export interface Lease {
   token: string;
 }
 export interface JobQueue {
-  claim(): Promise<Lease | null>;
+  claim(id?: string): Promise<Lease | null>;
   heartbeat(id: string, token: string): Promise<boolean>;
 }
 export class Store implements JobQueue {
   constructor(public db: SQL) {}
   async project(user: string, id: string): Promise<Project> {
     const { rows } = await this.db.query(
-      'SELECT p.data FROM projects p JOIN memberships m ON p.id=m.project_id WHERE m.user_id=$1 AND p.id=$2',
+      "SELECT p.data - 'repositoryIndex' AS data FROM projects p JOIN memberships m ON p.id=m.project_id WHERE m.user_id=$1 AND p.id=$2",
       [user, id],
     );
     if (!rows[0]) throw new DomainError(404, 'Project not found');
@@ -31,7 +31,7 @@ export class Store implements JobQueue {
   async projects(user: string): Promise<Project[]> {
     return (
       await this.db.query(
-        "SELECT p.data FROM projects p JOIN memberships m ON p.id=m.project_id WHERE m.user_id=$1 ORDER BY p.data->>'name'",
+        "SELECT p.data - 'repositoryIndex' AS data FROM projects p JOIN memberships m ON p.id=m.project_id WHERE m.user_id=$1 ORDER BY p.data->>'name'",
         [user],
       )
     ).rows.map((r) => r.data as unknown as Project);
@@ -109,7 +109,7 @@ export class Store implements JobQueue {
       return job;
     });
   }
-  async claim(): Promise<Lease | null> {
+  async claim(id?: string): Promise<Lease | null> {
     return this.db.transaction(async (db) => {
       // A crashed lease is failed rather than replaying an external side effect.
       const expired = (
@@ -133,7 +133,8 @@ export class Store implements JobQueue {
       }
       const row = (
         await db.query(
-          "SELECT id,data FROM jobs WHERE status='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
+          "SELECT id,data FROM jobs WHERE status='queued' AND ($1::uuid IS NULL OR id=$1) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
+          [id ?? null],
         )
       ).rows[0];
       if (!row) return null;
@@ -162,6 +163,13 @@ export class Store implements JobQueue {
       ).rows.length > 0
     );
   }
+  async setIntent(id: string, token: string, intent: 'analysis' | 'change') {
+    const r = await this.db.query(
+      "UPDATE jobs SET data=jsonb_set(data,'{intent}',to_jsonb($3::text)) WHERE id=$1 AND lease_token=$2 AND status='analyzing' RETURNING id",
+      [id, token, intent],
+    );
+    if (!r.rows.length) throw new DomainError(409, 'Task cancelled');
+  }
   async transition(
     id: string,
     token: string,
@@ -182,7 +190,7 @@ export class Store implements JobQueue {
       const allowed: Record<string, Phase[]> = {
         analyzing: ['planning', 'failed'],
         planning: ['editing', 'failed'],
-        editing: ['testing', 'failed'],
+        editing: ['testing', 'completed', 'failed'],
         testing: ['completed', 'failed'],
       };
       if (!allowed[job.status]?.includes(phase))
@@ -201,7 +209,7 @@ export class Store implements JobQueue {
         phase,
         message,
       ]);
-      if (phase === 'completed' && report) {
+      if (phase === 'completed' && report && report.checkpointAvailable !== false) {
         await db.query('SELECT id FROM projects WHERE id=$1 FOR UPDATE', [job.projectId]);
         const number =
           ((

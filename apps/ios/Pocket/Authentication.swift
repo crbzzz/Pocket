@@ -18,6 +18,13 @@ struct AuthUser: Codable, Sendable {
   struct Metadata: Codable, Sendable {
     let user_name: String?
     let preferred_username: String?
+    let avatar_url: String?
+    let picture: String?
+  }
+  var avatarURL: URL? {
+    guard let value = user_metadata?.avatar_url ?? user_metadata?.picture,
+      let url = URL(string: value), url.scheme == "https", url.host != nil else { return nil }
+    return url
   }
   var displayName: String {
     user_metadata?.user_name ?? user_metadata?.preferred_username ?? email ?? "GitHub"
@@ -134,6 +141,25 @@ final class PocketAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
       try SessionVault.save(session!)
     }
     return session!.access_token
+  }
+  func refreshProfileIfNeeded() async {
+    guard session != nil, session?.user?.avatarURL == nil,
+      let url = URL(string: "\(supabaseURL)/auth/v1/user"), url.scheme == "https" else { return }
+    do {
+      let accessToken = try await token()
+      var request = URLRequest(url: url)
+      request.timeoutInterval = 15
+      request.setValue(publicKey, forHTTPHeaderField: "apikey")
+      request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+      let (data, response) = try await URLSession.shared.data(for: request)
+      guard (response as? HTTPURLResponse)?.statusCode == 200,
+        var current = session, current.access_token == accessToken else { return }
+      current.user = try JSONDecoder().decode(AuthUser.self, from: data)
+      try SessionVault.save(current)
+      session = current
+    } catch {
+      // Keep the account button usable when the optional avatar cannot be refreshed.
+    }
   }
   private func exchange(grant: String, body: [String: String]) async throws -> AuthSession {
     guard let url = URL(string: "\(supabaseURL)/auth/v1/token?grant_type=\(grant)") else {

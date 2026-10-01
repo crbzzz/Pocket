@@ -3,6 +3,7 @@ import { DomainError, type Model } from './domain.js';
 export const actionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('search'), query: z.string().max(200) }),
   z.object({ kind: z.literal('read'), path: z.string().max(1000) }),
+  z.object({ kind: z.literal('list'), path: z.string().max(1000) }),
   z.object({
     kind: z.literal('write'),
     path: z.string().max(1000),
@@ -84,6 +85,7 @@ export interface LLMProvider {
     maxTokens: number,
     signal: AbortSignal,
     actionMode?: boolean,
+    allowedKinds?: string[],
   ): Promise<Completion>;
 }
 const configs = z.array(
@@ -162,6 +164,7 @@ export class HTTPModels implements LLMProvider {
     maxTokens: number,
     signal: AbortSignal,
     actionMode = false,
+    allowedKinds?: string[],
   ): Promise<Completion> {
     const key = process.env[envKeys[model.provider]];
     if (!key) throw new Error('Model credentials are not configured');
@@ -186,7 +189,18 @@ export class HTTPModels implements LLMProvider {
         messages: actionMode ? anthropicMessages(messages) : messages,
         max_tokens: maxTokens,
         ...(actionMode
-          ? { tools: actionTools, tool_choice: { type: 'any', disable_parallel_tool_use: true } }
+          ? {
+              tools: actionTools.filter(
+                (t) =>
+                  !allowedKinds ||
+                  (allowedKinds.length === 1 && allowedKinds[0] === 'finish') ||
+                  allowedKinds.includes(t.name.slice(toolPrefix.length)),
+              ),
+              tool_choice:
+                allowedKinds?.length === 1 && allowedKinds[0] === 'finish'
+                  ? { type: 'tool', name: 'pocket_finish', disable_parallel_tool_use: true }
+                  : { type: 'any', disable_parallel_tool_use: true },
+            }
           : {}),
       };
     } else {

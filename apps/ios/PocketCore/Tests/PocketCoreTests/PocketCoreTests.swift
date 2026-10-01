@@ -40,3 +40,51 @@ import Testing
     }
   }
 }
+
+@Test func repositoryCreationKeepsPrivateVisibilityAndEscapesDescription() throws {
+  let draft = RepositoryCreationDraft(
+    name: " my-project ", description: "A & visibility=public / café", owner: "@me", isPrivate: true
+  )
+  let url = try #require(draft.githubURL)
+  #expect(url.scheme == "https")
+  #expect(url.host == "github.com")
+  #expect(url.path == "/new")
+  let query = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+  #expect(query.filter { $0.name == "visibility" }.count == 1)
+  #expect(query.first { $0.name == "visibility" }?.value == "private")
+  #expect(query.first { $0.name == "description" }?.value == draft.description)
+  #expect(query.first { $0.name == "name" }?.value == "my-project")
+}
+
+@Test func repositoryCreationRejectsInvalidNamesAndLongDescriptions() {
+  for name in ["", ".", "..", "a/b", "has spaces", String(repeating: "a", count: 101)] {
+    #expect(
+      RepositoryCreationDraft(name: name, description: "", owner: "@me", isPrivate: true).githubURL
+        == nil)
+  }
+  #expect(
+    RepositoryCreationDraft(
+      name: "valid", description: String(repeating: "a", count: 351), owner: "@me", isPrivate: false
+    ).githubURL == nil)
+}
+
+private final class CancelledRequestProtocol: URLProtocol, @unchecked Sendable {
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.cancelled)) }
+  override func stopLoading() {}
+}
+
+@Test func cancelledNetworkRequestsAreNormalCancellationRatherThanAnAlert() async throws {
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [CancelledRequestProtocol.self]
+  let session = URLSession(configuration: configuration)
+  defer { session.invalidateAndCancel() }
+  let api = try PocketAPI(baseURL: URL(string: "https://pocket.example.com")!, session: session)
+  do {
+    let _: [AgentJob] = try await api.get("jobs", token: "test")
+    Issue.record("Expected cancellation")
+  } catch {
+    #expect(error is CancellationError)
+  }
+}

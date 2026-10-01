@@ -57,7 +57,7 @@ test('Anthropic agent actions use explicit tools and return valid actions with n
       content: 'export const hello = true;',
     });
     assert.equal(result.outputTokens, 30);
-    assert.equal(bodies[0].tools.length, 6);
+    assert.equal(bodies[0].tools.length, 7);
     assert.deepEqual(bodies[0].tool_choice, { type: 'any', disable_parallel_tool_use: true });
     await llm.complete(
       model,

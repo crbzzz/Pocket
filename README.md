@@ -53,7 +53,8 @@ The API and browser run on **Cloudflare Workers**, with Hyperdrive connecting to
 
 - Persistent jobs, resumable ordered events, branch-specific Git Saves, and compact project memory.
 - Transactional queue claims, worker leases, idempotent submissions, tenant authorization, cancellation, and two active task slots per user.
-- A bounded agent loop with search/read/write/run/check tools and a provider-neutral model router. The Anthropic adapter uses native tool calls rather than parsing freeform action prose; finish delivers the user-facing chat response.
+- Intent routing through the cheapest configured model before sandbox allocation: analyses produce chat answers without checkpoints; implementation requests edit files and prepare reviewable changes.
+- A bounded agent loop with list/search/read/write/run/check tools and a provider-neutral model router. The Anthropic adapter uses native tool calls rather than parsing freeform action prose; finish delivers the user-facing chat response.
 - Ephemeral Daytona sandboxes, output-capped command execution, timeouts, and cleanup on completion, failure, or cancellation.
 - Git bundles and file manifests persisted privately before sandbox deletion; subsequent tasks resume the branch’s latest Save.
 - Approved GitHub branch/PR creation, base-branch conflict detection, audit entries, webhook revocation, and replay protection.
