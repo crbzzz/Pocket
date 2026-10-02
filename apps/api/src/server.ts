@@ -1,3 +1,5 @@
+import { Previews } from './previews.js';
+import { Attachments } from './attachments.js';
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
@@ -26,12 +28,14 @@ export async function createServer(
     migrateSchema = true,
     nativeRateLimit = false,
     transport = Fastify,
+    onReply,
   }: {
     demo?: boolean;
     logger?: boolean;
     migrateSchema?: boolean;
     nativeRateLimit?: boolean;
     transport?: typeof Fastify;
+    onReply?: (text: string) => void;
   } = {},
 ) {
   if (migrateSchema) await migrate(db);
@@ -50,6 +54,8 @@ export async function createServer(
       'webhook_deliveries',
       'github_oauth_states',
       'github_user_grants',
+      'attachments',
+      'previews',
     ];
     const secured = (
       await db.query(
@@ -204,6 +210,43 @@ export async function createServer(
       return { deleted: true };
     },
   );
+  app.post('/v1/attachments', { bodyLimit: 750000 }, async (req) => {
+    const input = z
+      .object({
+        mimeType: z.enum(['image/jpeg', 'image/png']),
+        data: z
+          .string()
+          .min(4)
+          .max(670000)
+          .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+      })
+      .strict()
+      .parse(req.body);
+    return new Attachments(db).upload(req.userId, input.mimeType, input.data);
+  });
+  app.get<{ Params: { id: string } }>('/v1/attachments/:id', (req) =>
+    new Attachments(db).url(req.userId, z.uuid().parse(req.params.id)),
+  );
+  app.delete<{ Params: { id: string } }>('/v1/attachments/:id', (req) =>
+    new Attachments(db).remove(req.userId, z.uuid().parse(req.params.id)),
+  );
+  const previews = () =>
+    new Previews(db, store, new DaytonaProvider(), new GitHubApp(), new SupabaseCheckpoints());
+  app.post<{ Params: { id: string } }>('/v1/jobs/:id/preview', async (req) => {
+    const job = await store.job(req.userId, z.uuid().parse(req.params.id));
+    const project = await store.project(req.userId, job.projectId);
+    await repositoryAccess(req, project as typeof project & { installationId: number });
+    return previews().create(req.userId, job.id);
+  });
+  app.get<{ Params: { id: string } }>('/v1/previews/:id', (req) =>
+    previews().get(req.userId, z.uuid().parse(req.params.id)),
+  );
+  app.post<{ Params: { id: string } }>('/v1/previews/:id/start', (req) =>
+    previews().start(req.userId, z.uuid().parse(req.params.id)),
+  );
+  app.delete<{ Params: { id: string } }>('/v1/previews/:id', (req) =>
+    previews().stop(req.userId, z.uuid().parse(req.params.id)),
+  );
   app.get('/v1/jobs', (req) => store.jobs(req.userId));
   const executeJob = async (user: string, id: string) => {
     const current = await store.job(user, id);
@@ -220,6 +263,7 @@ export async function createServer(
               repository: github,
               storage: new SupabaseCheckpoints(),
               router,
+              onReply,
             },
       );
       await worker.runOne(AbortSignal.timeout(limits.runtimeMs + 5000), id);
@@ -237,8 +281,14 @@ export async function createServer(
       const project = await store.project(req.userId, input.projectId);
       await repositoryAccess(req, project as typeof project & { installationId: number });
     }
+    if (input.attachments.length) await new Attachments(db).owned(req.userId, input.attachments);
     const job = await store.create(req.userId, input, key, demo);
-    if (!demo && quickRequest(input.prompt) && job.status === 'queued') {
+    if (
+      !demo &&
+      !input.attachments.length &&
+      quickRequest(input.prompt) &&
+      job.status === 'queued'
+    ) {
       return reply.code(200).send(await executeJob(req.userId, job.id));
     }
     return reply.code(202).send(job);

@@ -48,14 +48,40 @@ public struct DiffFile: Codable, Identifiable, Sendable {
   public let deletions: Int
   public let patch: String
   public var lines: [DiffLine] {
-    patch.components(separatedBy: "\n").enumerated().map {
-      DiffLine(id: $0.offset, text: $0.element)
+    var old = 0
+    var new = 0
+    let pattern = try! NSRegularExpression(pattern: #"^@@ -(\d+)(?:,\d+)? \+(\d+)"#)
+    return patch.components(separatedBy: "\n").enumerated().map { index, text in
+      let range = NSRange(text.startIndex..., in: text)
+      if let match = pattern.firstMatch(in: text, range: range),
+        let a = Range(match.range(at: 1), in: text), let b = Range(match.range(at: 2), in: text)
+      {
+        old = Int(text[a]) ?? 0
+        new = Int(text[b]) ?? 0
+      }
+      var before: Int?
+      var after: Int?
+      if text.hasPrefix("+") && !text.hasPrefix("+++") {
+        after = new
+        new += 1
+      } else if text.hasPrefix("-") && !text.hasPrefix("---") {
+        before = old
+        old += 1
+      } else if text.hasPrefix(" ") {
+        before = old
+        after = new
+        old += 1
+        new += 1
+      }
+      return DiffLine(id: index, text: text, oldLine: before, newLine: after)
     }
   }
 }
 public struct DiffLine: Identifiable, Sendable {
   public let id: Int
   public let text: String
+  public var oldLine: Int? = nil
+  public var newLine: Int? = nil
   public enum Kind: Sendable { case addition, deletion, hunk, context }
   public var kind: Kind {
     if text.hasPrefix("+++") || text.hasPrefix("---") { return .hunk }
@@ -81,9 +107,13 @@ public struct AgentReport: Codable, Sendable {
   public var additions: Int { files.reduce(0) { $0 + $1.additions } }
   public var deletions: Int { files.reduce(0) { $0 + $1.deletions } }
   public let checkpointAvailable: Bool?
-  public var canShip: Bool { checkpointAvailable != false && !files.isEmpty && !checks.contains { $0.status == "failed" } }
+  public var canShip: Bool {
+    checkpointAvailable != false && !files.isEmpty && !checks.contains { $0.status == "failed" }
+  }
 }
 public struct AgentJob: Codable, Identifiable, Sendable {
+  public let attachments: [String]?
+  public let baseJobId: String?
   public let intent: String?
   public let id: String
   public let projectId: String
@@ -125,12 +155,29 @@ public struct TaskRequest: Encodable, Sendable {
   public let prompt: String
   public let modelId: String
   public let maxCostCents: Int
-  public init(projectId: String, branch: String, prompt: String, modelId: String, maxCostCents: Int)
-  {
+  public let attachments: [String]
+  public let baseJobId: String?
+  public init(
+    projectId: String, branch: String, prompt: String, modelId: String, maxCostCents: Int,
+    attachments: [String] = [], baseJobId: String? = nil
+  ) {
     self.projectId = projectId
     self.branch = branch
     self.prompt = prompt
     self.modelId = modelId
     self.maxCostCents = maxCostCents
+    self.attachments = attachments
+    self.baseJobId = baseJobId
   }
+}
+
+public struct WebPreview: Codable, Identifiable, Sendable {
+  public let id: String
+  public let jobId: String
+  public let status: String
+  public let stage: String
+  public let url: String?
+  public let logs: String?
+  public let error: String?
+  public let expiresAt: String
 }

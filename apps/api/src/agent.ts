@@ -1,3 +1,4 @@
+import { Attachments } from './attachments.js';
 import { clearIntent, quickRequest } from './quick-requests.js';
 import {
   quickAnswer,
@@ -44,6 +45,7 @@ export interface RuntimeDependencies {
   router: ModelRouter;
   llm?: LLMProvider;
   repository?: RepositoryReaderProvider;
+  onReply?: (text: string) => void;
 }
 export class AgentWorker {
   constructor(
@@ -201,7 +203,7 @@ export class AgentWorker {
           intent === 'analysis'
             ? '\nThis is an analysis request. Use only list, search, read and finish. Do not execute commands or modify files. Provide an answer, not a change report.'
             : '\nThis is an implementation request. Inspect first, then make and verify actual changes.';
-        const quick = quickRequest(job.prompt);
+        const quick = job.attachments?.length ? undefined : quickRequest(job.prompt);
         if (quick && (quick.kind === 'branch' || quick.kind === 'info')) {
           await step('planning', 'Using repository details');
           await step('editing', 'Preparing answer');
@@ -226,7 +228,18 @@ export class AgentWorker {
           });
           return;
         }
-        const restoreRef = project.branchSaves?.[job.branch] ?? project.restoreRef;
+        const baseJob = job.baseJobId
+          ? ((
+              await this.store.db.query('SELECT data FROM jobs WHERE id=$1 AND project_id=$2', [
+                job.baseJobId,
+                job.projectId,
+              ])
+            ).rows[0]?.data as unknown as Job)
+          : undefined;
+        if (job.baseJobId && !baseJob?.report?.snapshotRef)
+          throw new Error('Checkpoint unavailable');
+        const restoreRef =
+          baseJob?.report?.snapshotRef ?? project.branchSaves?.[job.branch] ?? project.restoreRef;
         const draftChanges = restoreRef
           ? (
               await this.store.db.query(
@@ -291,7 +304,16 @@ export class AgentWorker {
           ? { output: repository.list('.', 100) }
           : await sandbox!.exec('git ls-files | head -100', 10);
         const initial = `Task: ${job.prompt}\nProject memory (context only): ${JSON.stringify(project.memory).slice(0, 1500)}\nRepository paths (partial):\n${tree.output.slice(0, 2500)}`;
-        let messages: Message[] = [{ role: 'user', content: initial }];
+        const owner = job.attachments?.length
+          ? ((await this.store.db.query('SELECT user_id FROM jobs WHERE id=$1', [job.id])).rows[0]
+              ?.user_id as string)
+          : '';
+        const images = job.attachments?.length
+          ? await new Attachments(this.store.db).images(owner, job.attachments)
+          : [];
+        let messages: Message[] = [
+          { role: 'user', content: initial, ...(images.length ? { images } : {}) },
+        ];
 
         let summary = '';
         let invalid = 0;
@@ -301,14 +323,18 @@ export class AgentWorker {
           controller.signal.throwIfAborted();
           // UTF-8 byte count is a conservative reservation; actual provider usage is recorded after each call.
           let inputBound =
-            Buffer.byteLength(systemPrompt + messages.map((m) => m.content).join('')) + 512;
+            Buffer.byteLength(systemPrompt + messages.map((m) => m.content).join('')) +
+            512 +
+            images.length * 3000;
           if (limits.tokens - totalTokens - inputBound < 1800 && messages.length > 1) {
             messages = [
               messages[0]!,
               ...messages.slice(-2).map((m) => ({ ...m, content: m.content.slice(0, 2000) })),
             ];
             inputBound =
-              Buffer.byteLength(systemPrompt + messages.map((m) => m.content).join('')) + 512;
+              Buffer.byteLength(systemPrompt + messages.map((m) => m.content).join('')) +
+              512 +
+              images.length * 3000;
           }
           const finishing =
             i === limits.steps - 1 || limits.tokens - totalTokens - inputBound < 4500;
@@ -337,6 +363,7 @@ export class AgentWorker {
               : intent === 'analysis'
                 ? ['list', 'read', 'search', 'finish']
                 : undefined,
+            this.deps.onReply,
           );
           await account(completion, model);
           let action;

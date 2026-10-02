@@ -1,3 +1,4 @@
+import PhotosUI
 import PocketCore
 import SwiftUI
 
@@ -5,6 +6,9 @@ struct ChatView: View {
   @Environment(PocketStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var memory = false
+  @State private var photos: [PhotosPickerItem] = []
+  @State private var previewJob: AgentJob?
+  @State private var followReply = true
   @FocusState private var composing: Bool
   var body: some View {
     @Bindable var store = store
@@ -39,6 +43,7 @@ struct ChatView: View {
         Button {
           store.newConversation = true
           store.draft = ""
+          store.correctionBaseId = nil
           composing = true
         } label: {
           Image(systemName: "square.and.pencil")
@@ -66,9 +71,12 @@ struct ChatView: View {
               ForEach(Array(store.projectJobs.reversed())) { job in
                 HStack {
                   Spacer(minLength: 38)
-                  Text(job.prompt).font(.body).lineSpacing(4).textSelection(.enabled)
-                    .foregroundStyle(PocketStyle.ink).padding(16)
-                    .background(PocketStyle.soft, in: RoundedRectangle(cornerRadius: 19))
+                  VStack(alignment: .trailing, spacing: 12) {
+                    if let images = job.attachments, !images.isEmpty { MessageImages(ids: images) }
+                    Text(job.prompt).font(.body).lineSpacing(4).textSelection(.enabled)
+                      .foregroundStyle(PocketStyle.ink).padding(16)
+                      .background(PocketStyle.soft, in: RoundedRectangle(cornerRadius: 19))
+                  }
                 }
                 VStack(alignment: .leading, spacing: 15) {
                   HStack(spacing: 8) {
@@ -81,6 +89,8 @@ struct ChatView: View {
                   }
                   if let summary = job.report?.summary {
                     MarkdownResponse(content: summary)
+                  } else if let text = store.partialReplies[job.id], !text.isEmpty {
+                    MarkdownResponse(content: text)
                   } else if let error = job.error {
                     Text(error).font(.body).lineSpacing(4).textSelection(.enabled)
                       .foregroundStyle(PocketStyle.ink)
@@ -88,20 +98,42 @@ struct ChatView: View {
                   if job.status.isActive && job.intent != "change" {
                     HStack(spacing: 10) {
                       ProgressView().controlSize(.small).tint(PocketStyle.accent)
-                      Text(job.intent == "analysis" ? "Reading your repository…" : "Understanding your request…")
-                        .font(.subheadline).foregroundStyle(PocketStyle.muted)
+                      Text(
+                        store.partialReplies[job.id] != nil
+                          ? "Writing…"
+                          : job.intent == "analysis"
+                            ? "Reading your repository…" : "Understanding your request…"
+                      )
+                      .font(.subheadline).foregroundStyle(PocketStyle.muted)
                       Spacer()
-                      Button { Task { await store.cancel(job) } } label: { Image(systemName: "stop.circle") }
-                        .accessibilityLabel("Stop response")
+                      Button {
+                        Task { await store.cancel(job) }
+                      } label: {
+                        Image(systemName: "stop.circle")
+                      }
+                      .accessibilityLabel("Stop response")
                     }
                   } else if job.status == .failed && job.intent != "change" {
-                    Button("Try again", systemImage: "arrow.clockwise") { store.draft = job.prompt; composing = true }
-                      .font(.subheadline).foregroundStyle(PocketStyle.accent)
-                  } else if (job.id == store.currentJob?.id || job.status.isActive) && (job.intent == "change" || job.demo || job.report?.files.isEmpty == false) && (job.status != .completed || job.report?.files.isEmpty == false) {
+                    Button("Try again", systemImage: "arrow.clockwise") {
+                      store.draft = job.prompt
+                      composing = true
+                    }
+                    .font(.subheadline).foregroundStyle(PocketStyle.accent)
+                  } else if (job.id == store.currentJob?.id || job.status.isActive)
+                    && (job.intent == "change" || job.demo || job.report?.files.isEmpty == false)
+                    && (job.status != .completed || job.report?.files.isEmpty == false)
+                  {
                     JobCard(job: job)
                   } else if job.report?.files.isEmpty == false {
                     Button("Review changes") { store.selectJob(job, tab: .changes) }
                       .font(.system(size: 12, weight: .medium)).foregroundStyle(PocketStyle.accent)
+                  }
+                  if job.status == .completed, job.report?.checkpointAvailable != false,
+                    job.report?.snapshotRef.isEmpty == false
+                  {
+                    Button("Open preview", systemImage: "play.rectangle") { previewJob = job }.font(
+                      .subheadline
+                    ).foregroundStyle(PocketStyle.accent)
                   }
                 }
               }
@@ -109,6 +141,18 @@ struct ChatView: View {
             Color.clear.frame(height: 1).id("conversation-end")
           }.padding(.horizontal, 22).padding(.bottom, 12)
         }.scrollDismissesKeyboard(.interactively)
+          .simultaneousGesture(DragGesture().onChanged { _ in followReply = false })
+          .onChange(of: store.partialReplies[store.currentJob?.id ?? ""]) { _, _ in
+            if followReply { proxy.scrollTo("conversation-end", anchor: .bottom) }
+          }
+          .overlay(alignment: .bottomTrailing) {
+            if !followReply, store.currentJob?.status.isActive == true {
+              Button("Latest", systemImage: "arrow.down") {
+                followReply = true
+                proxy.scrollTo("conversation-end", anchor: .bottom)
+              }.font(.caption).padding(10).background(PocketStyle.card, in: Capsule()).padding(12)
+            }
+          }
           .onChange(of: store.jobs.count) { _, _ in
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
               proxy.scrollTo("conversation-end", anchor: .bottom)
@@ -119,10 +163,45 @@ struct ChatView: View {
     .safeAreaInset(edge: .bottom, spacing: 0) {
       VStack(spacing: 0) {
         VStack(alignment: .leading, spacing: 15) {
+          if let base = store.correctionBaseId, store.jobs.contains(where: { $0.id == base }) {
+            HStack {
+              Label("Correcting saved changes", systemImage: "arrow.uturn.backward").font(.caption)
+                .foregroundStyle(PocketStyle.accent)
+              Spacer()
+              Button("Clear", systemImage: "xmark") { store.correctionBaseId = nil }.labelStyle(
+                .iconOnly)
+            }
+          }
+          if !store.draftImages.isEmpty {
+            HStack(spacing: 12) {
+              ForEach(store.draftImages) { image in
+                if let uiImage = UIImage(data: image.data) {
+                  Image(uiImage: uiImage).resizable().scaledToFill().frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 10)).overlay(alignment: .topTrailing)
+                  {
+                    Button {
+                      store.removeImage(image.id)
+                    } label: {
+                      Image(systemName: "xmark.circle.fill").foregroundStyle(
+                        .white, .black.opacity(0.7))
+                    }.disabled(store.isSending)
+                  }
+                }
+              }
+            }
+          }
           TextField("Message Pocket", text: $store.draft, axis: .vertical)
             .lineLimit(1...6).font(.body).foregroundStyle(PocketStyle.ink)
             .focused($composing).padding(.top, 2)
           HStack {
+            PhotosPicker(
+              selection: $photos, maxSelectionCount: max(1, 2 - store.draftImages.count),
+              matching: .images
+            ) {
+              Image(systemName: "plus").font(.system(size: 18)).foregroundStyle(PocketStyle.muted)
+            }.disabled(store.isSending || store.draftImages.count >= 2 || store.isLoadingImages)
+              .accessibilityLabel("Attach screenshots")
+            if store.isLoadingImages { ProgressView().controlSize(.small) }
             Menu {
               ForEach(store.models) { model in
                 Button {
@@ -146,6 +225,7 @@ struct ChatView: View {
             }
             Button {
               composing = false
+              followReply = true
               Task { await store.send() }
             } label: {
               Group {
@@ -157,20 +237,39 @@ struct ChatView: View {
               }.foregroundStyle(PocketStyle.paper).frame(width: 40, height: 40)
                 .background(PocketStyle.highlight, in: Circle())
             }.buttonStyle(.plain).disabled(
-              store.isSending || store.project == nil || store.models.isEmpty
-                || store.draft.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
+              store.isSending || store.isLoadingImages || store.project == nil
+                || store.models.isEmpty
+                || (store.draft.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
+                  && store.draftImages.isEmpty)
             )
             .opacity(
-              store.draft.trimmingCharacters(in: .whitespacesAndNewlines).count < 3 ? 0.4 : 1
+              store.draft.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
+                && store.draftImages.isEmpty ? 0.4 : 1
             )
             .accessibilityLabel("Send task")
           }
         }.padding(17).background(PocketStyle.card, in: RoundedRectangle(cornerRadius: 21))
-          .overlay(RoundedRectangle(cornerRadius: 21).stroke(PocketStyle.line.opacity(0.6), lineWidth: 0.5))
+          .overlay(
+            RoundedRectangle(cornerRadius: 21).stroke(PocketStyle.line.opacity(0.6), lineWidth: 0.5)
+          )
 
           .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 2)
       }.background(PocketStyle.paper)
     }
+    .onChange(of: photos) { _, items in
+      guard !items.isEmpty else { return }
+      Task {
+        store.isLoadingImages = true
+        defer {
+          store.isLoadingImages = false
+          photos = []
+        }
+        for item in items {
+          if let data = try? await item.loadTransferable(type: Data.self) { store.addImage(data) }
+        }
+      }
+    }
+    .sheet(item: $previewJob) { PreviewView(job: $0) }
     .onChange(of: composing) { _, value in store.isComposing = value }
     .onDisappear { store.isComposing = false }
     .pocketToolbar().sheet(isPresented: $memory) { MemoryView() }

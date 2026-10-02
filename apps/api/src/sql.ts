@@ -22,6 +22,9 @@ export async function migrate(db: SQL) {
     CREATE TABLE IF NOT EXISTS github_user_grants (user_id uuid PRIMARY KEY REFERENCES users(id), encrypted_token text NOT NULL, expires_at timestamptz NOT NULL);
     CREATE TABLE IF NOT EXISTS webhook_deliveries (id text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS usage (id bigserial PRIMARY KEY, job_id uuid NOT NULL REFERENCES jobs(id), input_tokens integer NOT NULL, output_tokens integer NOT NULL, cost_cents numeric NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE IF NOT EXISTS attachments (id uuid PRIMARY KEY, user_id uuid NOT NULL REFERENCES users(id), mime_type text NOT NULL, size integer NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE IF NOT EXISTS previews (id uuid PRIMARY KEY, user_id uuid NOT NULL REFERENCES users(id), job_id uuid NOT NULL REFERENCES jobs(id), data jsonb NOT NULL, expires_at timestamptz NOT NULL, status text NOT NULL);
+    CREATE INDEX IF NOT EXISTS previews_expiry ON previews(status,expires_at);
     CREATE UNIQUE INDEX IF NOT EXISTS projects_github_repo ON projects ((data->>'installationId'),(data->>'repositoryId')) WHERE data->>'repositoryId' IS NOT NULL;`;
   await db.transaction(async (tx) => {
     for (const statement of schema

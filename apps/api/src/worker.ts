@@ -9,6 +9,7 @@ import { DaytonaProvider } from './sandbox.js';
 import { GitHubApp } from './github.js';
 import { SupabaseCheckpoints } from './artifacts.js';
 import { ModelRouter } from './models.js';
+import { Previews } from './previews.js';
 
 interface Bindings {
   HYPERDRIVE: { connectionString: string };
@@ -20,6 +21,7 @@ interface Bindings {
   [key: string]: unknown;
 }
 const context = new AsyncLocalStorage<SQL>();
+const replies = new AsyncLocalStorage<(text: string) => void>();
 const current = () => {
   const db = context.getStore();
   if (!db) throw new Error('Database access requires an invocation context');
@@ -104,52 +106,109 @@ export default {
     const payload = Buffer.concat(chunks);
 
     const db = postgres(env.HYPERDRIVE.connectionString, { useCA: false });
-    try {
-      return await context.run(db, async () => {
-        server ??= createServer(database, {
-          demo: false,
-          logger: true,
-          migrateSchema: false,
-          nativeRateLimit: true,
-          transport: createEdgeRouter as never,
+    const handle = async () => {
+      try {
+        return await context.run(db, async () => {
+          server ??= createServer(database, {
+            demo: false,
+            logger: true,
+            migrateSchema: false,
+            nativeRateLimit: true,
+            transport: createEdgeRouter as never,
+            onReply: (text) => replies.getStore()?.(text),
+          });
+          const { app } = await server;
+          const response = await app.inject({
+            method: request.method as 'GET' | 'POST' | 'DELETE',
+            url: url.pathname + url.search,
+            headers: Object.fromEntries(request.headers),
+            remoteAddress: request.headers.get('CF-Connecting-IP') ?? '127.0.0.1',
+            ...(payload.byteLength ? { payload: Buffer.from(payload) } : {}),
+          });
+          const headers = new Headers();
+          for (const [key, value] of Object.entries(response.headers)) {
+            if (value !== undefined && !['connection', 'transfer-encoding'].includes(key))
+              headers.set(key, Array.isArray(value) ? value.join(', ') : String(value));
+          }
+          headers.set('Cache-Control', 'no-store');
+          return new Response(
+            request.method === 'HEAD' ? null : new Uint8Array(response.rawPayload),
+            {
+              status: response.statusCode,
+              headers,
+            },
+          );
         });
-        const { app } = await server;
-        const response = await app.inject({
-          method: request.method as 'GET' | 'POST' | 'DELETE',
-          url: url.pathname + url.search,
-          headers: Object.fromEntries(request.headers),
-          remoteAddress: request.headers.get('CF-Connecting-IP') ?? '127.0.0.1',
-          ...(payload.byteLength ? { payload: Buffer.from(payload) } : {}),
-        });
-        const headers = new Headers();
-        for (const [key, value] of Object.entries(response.headers)) {
-          if (value !== undefined && !['connection', 'transfer-encoding'].includes(key))
-            headers.set(key, Array.isArray(value) ? value.join(', ') : String(value));
-        }
-        headers.set('Cache-Control', 'no-store');
-        return new Response(
-          request.method === 'HEAD' ? null : new Uint8Array(response.rawPayload),
-          {
-            status: response.statusCode,
-            headers,
-          },
+      } catch (error) {
+        server = undefined;
+        console.error(
+          JSON.stringify({
+            event: 'api.unavailable',
+            path: url.pathname,
+            errorName: error instanceof Error ? error.name : 'Error',
+            reason: error instanceof Error ? error.message : 'Unknown',
+            stack: error instanceof Error ? error.stack : undefined,
+          }),
         );
+        return json({ error: 'Pocket is temporarily unavailable. Please try again.' }, 503);
+      } finally {
+        await db.close();
+      }
+    };
+    if (
+      request.method === 'POST' &&
+      /^\/v1\/jobs\/[a-f0-9-]+\/start$/.test(url.pathname) &&
+      request.headers.get('Accept')?.includes('text/event-stream')
+    ) {
+      const encoder = new TextEncoder();
+      let closed = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const emit = (value: unknown) => {
+            if (!closed) {
+              try {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`));
+              } catch {
+                closed = true;
+              }
+            }
+          };
+          emit({ type: 'connected' });
+          void replies.run(
+            (text) => emit({ type: 'reply', text }),
+            async () => {
+              try {
+                const response = await handle();
+                const value = await response.json();
+                emit(
+                  response.ok
+                    ? { type: 'done', job: value }
+                    : { type: 'error', error: (value as any).error },
+                );
+              } catch {
+                emit({ type: 'error', error: 'Connection interrupted. Please try again.' });
+              } finally {
+                if (!closed) {
+                  closed = true;
+                  controller.close();
+                }
+              }
+            },
+          );
+        },
+        cancel() {
+          closed = true;
+        },
       });
-    } catch (error) {
-      server = undefined;
-      console.error(
-        JSON.stringify({
-          event: 'api.unavailable',
-          path: url.pathname,
-          errorName: error instanceof Error ? error.name : 'Error',
-          reason: error instanceof Error ? error.message : 'Unknown',
-          stack: error instanceof Error ? error.stack : undefined,
-        }),
-      );
-      return json({ error: 'Pocket is temporarily unavailable. Please try again.' }, 503);
-    } finally {
-      await db.close();
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
     }
+    return handle();
   },
   async scheduled(_controller: unknown, env: Bindings): Promise<void> {
     configure(env);
@@ -175,6 +234,27 @@ export default {
         signal: AbortSignal.timeout(15000),
       });
       if (!marked.ok) throw new Error('Checkpoint cleanup acknowledgement failed');
+    }
+    const expired = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/previews?expires_at=lt.${encodeURIComponent(new Date().toISOString())}&or=(data->>destroyed.is.null,data->>destroyed.eq.false)&select=id,user_id&limit=5`,
+      { headers: cleanupHeaders, signal: AbortSignal.timeout(15000) },
+    );
+    if (!expired.ok) throw new Error('Preview cleanup inspection failed');
+    const expiredRows = (await expired.json()) as { id: string; user_id: string }[];
+    if (expiredRows.length) {
+      const cleanupDB = postgres(env.HYPERDRIVE.connectionString, { useCA: false });
+      try {
+        const service = new Previews(
+          cleanupDB,
+          new Store(cleanupDB),
+          new DaytonaProvider(),
+          new GitHubApp(),
+          new SupabaseCheckpoints(),
+        );
+        for (const row of expiredRows) await service.stop(row.user_id, row.id);
+      } finally {
+        await cleanupDB.close();
+      }
     }
     // Empty queues never allocate a SQL socket or sandbox. No per-user polling.
     const queued = await fetch(

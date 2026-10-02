@@ -53,6 +53,49 @@ public struct PocketAPI: Sendable {
     try await request(
       "jobs/\(id)/start", token: token, body: Data("{}".utf8), idempotencyKey: nil, timeout: 240)
   }
+  public func streamJob(_ id: String, token: String, onReply: @Sendable (String) async -> Void)
+    async throws -> AgentJob
+  {
+    var request = URLRequest(url: baseURL.appendingPathComponent("v1/jobs/\(id)/start"))
+    request.httpMethod = "POST"
+    request.httpBody = Data("{}".utf8)
+    request.timeoutInterval = 240
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+    let (bytes, response) = try await session.bytes(for: request)
+    guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+    guard (200..<300).contains(http.statusCode) else {
+      throw APIError.server(http.statusCode, "Couldn't start the response. Try again.")
+    }
+    if http.value(forHTTPHeaderField: "Content-Type")?.contains("text/event-stream") != true {
+      var data = Data()
+      for try await byte in bytes {
+        data.append(byte)
+        if data.count > 2_000_000 { throw APIError.invalidResponse }
+      }
+      return try JSONDecoder().decode(AgentJob.self, from: data)
+    }
+    for try await line in bytes.lines {
+      guard line.hasPrefix("data: ") else { continue }
+      let event = try JSONDecoder().decode(ReplyEvent.self, from: Data(line.dropFirst(6).utf8))
+      if event.type == "error" { throw APIError.server(502, event.error ?? "Response interrupted") }
+      if let text = event.text, event.type == "reply" { await onReply(text) }
+      if let job = event.job, event.type == "done" { return job }
+    }
+    throw APIError.unreachable(baseURL.absoluteString)
+  }
+  public func startPreview(_ id: String, token: String) async throws -> WebPreview {
+    try await request(
+      "previews/\(id)/start", token: token, body: Data("{}".utf8), idempotencyKey: nil, timeout: 300
+    )
+  }
+  private struct ReplyEvent: Decodable {
+    let type: String
+    let text: String?
+    let job: AgentJob?
+    let error: String?
+  }
   public func delete<T: Decodable & Sendable>(_ path: String, token: String) async throws -> T {
     try await request(path, token: token, body: nil, idempotencyKey: nil, method: "DELETE")
   }

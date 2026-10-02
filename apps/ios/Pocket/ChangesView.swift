@@ -4,6 +4,9 @@ import SwiftUI
 struct ChangesView: View {
   @Environment(PocketStore.self) private var store
   @State private var shipping: String?
+  @State private var previewJob: AgentJob?
+  @State private var commentFile: DiffFile?
+  @State private var comment = ""
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 22) {
@@ -16,7 +19,22 @@ struct ChangesView: View {
             Text("Demo diff · checks are simulated").font(.system(size: 10)).foregroundStyle(
               PocketStyle.muted)
           }
-          ForEach(report.files) { file in DiffFileView(file: file) }
+          ForEach(report.files) { file in
+            VStack(alignment: .leading, spacing: 8) {
+              DiffFileView(file: file) { line in
+                comment = "Line \(line.newLine ?? line.oldLine ?? 0):\n"
+                commentFile = file
+              }
+              Button("Comment on this file", systemImage: "text.bubble") {
+                comment = ""
+                commentFile = file
+              }.font(.caption).foregroundStyle(PocketStyle.accent)
+            }
+          }
+          if report.checkpointAvailable != false {
+            Button("Open preview", systemImage: "play.rectangle") { previewJob = job }.buttonStyle(
+              PocketButtonStyle())
+          }
           ForEach(report.checks) { check in
             VStack(alignment: .leading, spacing: 6) {
               Label(
@@ -42,10 +60,11 @@ struct ChangesView: View {
           }
           HStack(spacing: 16) {
             Button("Request changes") {
-              store.draft = "Please adjust the previous changes: "
-              store.tab = .chat
+              store.requestCorrection(job)
             }
-            if report.checkpointAvailable != false { Button("View checkpoint") { store.tab = .saves } }
+            if report.checkpointAvailable != false {
+              Button("View checkpoint") { store.tab = .saves }
+            }
           }.font(.system(size: 11)).padding(.vertical, 5)
         } else {
           EmptyPocket(
@@ -57,11 +76,36 @@ struct ChangesView: View {
     }.pocketToolbar().task(id: store.currentJob?.id) { await store.loadDiff() }.sheet(
       item: Binding(get: { shipping.map { ShipSheetKind(id: $0) } }, set: { shipping = $0?.id })
     ) { kind in ShipSheet(kind: kind.id) }
+    .sheet(item: $previewJob) { PreviewView(job: $0) }
+    .sheet(item: $commentFile) { file in
+      NavigationStack {
+        VStack(alignment: .leading, spacing: 18) {
+          Text(file.path).font(.system(.subheadline, design: .monospaced)).foregroundStyle(
+            PocketStyle.muted)
+          TextEditor(text: $comment).scrollContentBackground(.hidden).frame(minHeight: 160).padding(
+            12
+          ).background(PocketStyle.card, in: RoundedRectangle(cornerRadius: 12))
+          Button("Ask Pocket to correct this file", systemImage: "sparkles") {
+            if let job = store.currentJob {
+              store.requestCorrection(job, path: file.path, comment: comment)
+            }
+            commentFile = nil
+          }.buttonStyle(PocketButtonStyle(primary: true)).disabled(
+            comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          Spacer()
+        }.padding(24).background(PocketStyle.paper).navigationTitle("Request a correction")
+          .navigationBarTitleDisplayMode(.inline)
+          .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { commentFile = nil } }
+          }
+      }.presentationDetents([.medium, .large])
+    }
   }
 }
 private struct ShipSheetKind: Identifiable { let id: String }
 struct DiffFileView: View {
   let file: DiffFile
+  var onComment: ((DiffLine) -> Void)? = nil
   @State private var expanded = true
   var body: some View {
     DisclosureGroup(isExpanded: $expanded) {
@@ -69,13 +113,20 @@ struct DiffFileView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
           ForEach(file.lines) { line in
             HStack(alignment: .top, spacing: 8) {
-              Text("\(line.id + 1)").foregroundStyle(PocketStyle.muted).frame(
+              Text(line.oldLine.map(String.init) ?? "")
+                .foregroundStyle(PocketStyle.muted).frame(width: 30, alignment: .trailing)
+              Text(line.newLine.map(String.init) ?? "").foregroundStyle(PocketStyle.muted).frame(
                 width: 23, alignment: .trailing)
               Text(line.text.isEmpty ? " " : line.text).foregroundStyle(foreground(line.kind))
                 .fixedSize(horizontal: true, vertical: false).textSelection(.enabled)
             }.font(.system(size: 12, design: .monospaced)).padding(.vertical, 3).padding(
               .horizontal, 6
             ).frame(maxWidth: .infinity, alignment: .leading).background(background(line.kind))
+              .contextMenu {
+                if line.oldLine != nil || line.newLine != nil {
+                  Button("Request change here", systemImage: "text.bubble") { onComment?(line) }
+                }
+              }
           }
         }
       }.padding(.top, 8)

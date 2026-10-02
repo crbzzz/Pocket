@@ -13,9 +13,12 @@ export interface SandboxHandle {
   checkpoint(baseRef: string): Promise<Checkpoint & { files: DiffFile[] }>;
   restore(bundle: Buffer, commit: string): Promise<void>;
   destroy(): Promise<void>;
+  preview?(command: string, port: number, seconds: number): Promise<string>;
+  previewLogs?(): Promise<string>;
 }
 export interface SandboxProvider {
   create(jobId: string, repo: string, branch: string, readToken: string): Promise<SandboxHandle>;
+  attach?(id: string): Promise<SandboxHandle>;
 }
 export const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
 export function safePath(path: string): string {
@@ -55,6 +58,11 @@ except subprocess.TimeoutExpired:
 print(json.dumps({'exitCode':p.returncode if not reason else 137,'output':data[:16000].decode(errors='replace')+('\\n'+reason if reason else '')}))`;
 export class DaytonaProvider implements SandboxProvider {
   private client = new Daytona({ apiKey: process.env.DAYTONA_API_KEY });
+  async attach(id: string): Promise<SandboxHandle> {
+    const sandbox = await this.client.get(id);
+    const home = await sandbox.getUserHomeDir();
+    return new DaytonaHandle(sandbox, `${home}/pocket-repo`);
+  }
   async create(
     jobId: string,
     repo: string,
@@ -201,6 +209,37 @@ print(json.dumps({'commit':commit,'baseRef':base,'files':files,'changes':changes
     const bundle = await this.sandbox.fs.downloadFile('/tmp/pocket-save.bundle');
     if (bundle.length > 20 * 1024 * 1024) throw new Error('Git Save exceeds 20 MB');
     return { ...d, bundle };
+  }
+  async previewLogs() {
+    return (await this.exec('tail -c 16000 /tmp/pocket-preview.log 2>/dev/null || true', 10))
+      .output;
+  }
+  async preview(command: string, port: number, seconds: number): Promise<string> {
+    const session = 'pocket-preview';
+    await this.sandbox.process.createSession(session);
+    // Bound both wall time and log storage even if the app disconnects.
+    const runner = `import subprocess,os,time,selectors,signal,sys
+p=subprocess.Popen(['/bin/sh','-c',sys.argv[1]],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True)
+s=selectors.DefaultSelector();s.register(p.stdout,selectors.EVENT_READ);end=time.monotonic()+int(sys.argv[2]);total=0
+with open('/tmp/pocket-preview.log','wb',buffering=0) as f:
+ while time.monotonic()<end and p.poll() is None:
+  if s.select(.2):
+   part=os.read(p.stdout.fileno(),4096)
+   if not part: break
+   if total<2000000: f.write(part);total+=len(part)
+ try: os.killpg(p.pid,signal.SIGKILL)
+ except ProcessLookupError: pass`;
+    await this.sandbox.process.executeSessionCommand(session, {
+      command: `cd ${quote(this.root)} && python3 -I -c ${quote(runner)} ${quote(command)} ${Math.min(seconds, 600)}`,
+      runAsync: true,
+    });
+    const ready = await this.exec(
+      `python3 -I -c ${quote('import urllib.request,time,sys; end=time.monotonic()+55\nwhile time.monotonic()<end:\n try:\n  urllib.request.urlopen("http://127.0.0.1:' + port + '",timeout=2);sys.exit(0)\n except Exception: time.sleep(1)\nsys.exit(1)')}`,
+      60,
+    );
+    if (ready.exitCode !== 0) throw new Error('Preview did not start. Review the build output.');
+    const link = await this.sandbox.getSignedPreviewUrl(port, Math.min(seconds, 600));
+    return link.url;
   }
   async destroy() {
     await this.sandbox.delete(30, true);

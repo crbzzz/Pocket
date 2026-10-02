@@ -1,6 +1,7 @@
 import AuthenticationServices
 import PocketCore
 import SwiftUI
+import UIKit
 import UserNotifications
 
 @MainActor @Observable
@@ -15,6 +16,15 @@ final class PocketStore {
   var selectedJobId: String?
   var modelId = UserDefaults.standard.string(forKey: "modelId") ?? "auto"
   var draft = ""
+  var correctionBaseId: String?
+  var partialReplies: [String: String] = [:]
+  struct DraftImage: Identifiable {
+    let id = UUID()
+    let data: Data
+    var uploadedID: String?
+  }
+  var draftImages: [DraftImage] = []
+  var isLoadingImages = false
   var configuration: APIConfiguration?
   var isLoading = false
   var isSending = false
@@ -105,6 +115,7 @@ final class PocketStore {
     } catch { report(error) }
   }
   func select(_ project: Project) {
+    correctionBaseId = nil
     selectedProjectId = project.id
     selectedJobId = nil
     UserDefaults.standard.set(project.id, forKey: "selectedProjectId")
@@ -129,25 +140,49 @@ final class PocketStore {
     Task { await loadSaves() }
   }
   func branch(_ branch: String) {
+    correctionBaseId = nil
     if let index = projects.firstIndex(where: { $0.id == project?.id }) {
       projects[index].branch = branch
     }
   }
   func send() async {
-    guard !isSending, let project, draft.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3
+    guard !isSending, !isLoadingImages, let project,
+      draft.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 || !draftImages.isEmpty
     else { return }
     isSending = true
     defer { isSending = false }
     do {
       let token = try await token()
+      struct Upload: Encodable, Sendable {
+        let mimeType: String
+        let data: String
+      }
+      struct Uploaded: Decodable, Sendable { let id: String }
+      var imageIDs: [String] = []
+      for index in draftImages.indices {
+        if let existing = draftImages[index].uploadedID {
+          imageIDs.append(existing)
+          continue
+        }
+        let uploaded: Uploaded = try await api.post(
+          "attachments",
+          body: Upload(mimeType: "image/jpeg", data: draftImages[index].data.base64EncodedString()),
+          token: token)
+        draftImages[index].uploadedID = uploaded.id
+        imageIDs.append(uploaded.id)
+      }
       let request = TaskRequest(
-        projectId: project.id, branch: project.branch, prompt: draft, modelId: modelId,
-        maxCostCents: maxCostCents)
+        projectId: project.id, branch: project.branch,
+        prompt: draft.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3
+          ? draft : "Describe the attached image.", modelId: modelId,
+        maxCostCents: maxCostCents, attachments: imageIDs, baseJobId: correctionBaseId)
       let job: AgentJob = try await api.post("jobs", body: request, token: token)
       newConversation = false
       jobs.insert(job, at: 0)
       selectedJobId = job.id
       draft = ""
+      draftImages = []
+      correctionBaseId = nil
       tab = .chat
       startPolling()
     } catch { report(error) }
@@ -353,6 +388,62 @@ final class PocketStore {
     }
     UserDefaults.standard.set(notifications, forKey: "notifications")
   }
+  func requestCorrection(_ job: AgentJob, path: String? = nil, comment: String = "") {
+    selectJob(job, tab: .chat)
+    correctionBaseId = job.id
+    draft = "Please correct the saved changes" + (path.map { " in `\($0)`" } ?? "") + ": " + comment
+  }
+  func addImage(_ data: Data) {
+    guard draftImages.count < 2, let image = UIImage(data: data) else { return }
+    let scale = min(1, 1280 / max(image.size.width, image.size.height))
+    let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = true
+    let resized = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+      image.draw(in: CGRect(origin: .zero, size: size))
+    }
+    var encoded: Data?
+    for quality in [0.75, 0.55, 0.35, 0.15] {
+      encoded = resized.jpegData(compressionQuality: quality)
+      if let encoded, encoded.count <= 500000 {
+        draftImages.append(DraftImage(data: encoded))
+        return
+      }
+    }
+    error = "This image is too large. Choose a smaller screenshot."
+  }
+  func removeImage(_ id: UUID) {
+    guard !isSending, let image = draftImages.first(where: { $0.id == id }) else { return }
+    draftImages.removeAll { $0.id == id }
+    if let uploaded = image.uploadedID {
+      Task {
+        struct Removed: Decodable, Sendable { let deleted: Bool }
+        let _: Removed? = try? await api.delete("attachments/\(uploaded)", token: token())
+      }
+    }
+  }
+  func imageURL(_ id: String) async -> URL? {
+    struct Link: Decodable, Sendable { let url: String }
+    guard let link: Link = try? await api.get("attachments/\(id)", token: token()),
+      let url = URL(string: link.url), url.scheme == "https"
+    else { return nil }
+    return url
+  }
+  func createPreview(_ job: AgentJob) async throws -> WebPreview {
+    struct Empty: Encodable, Sendable {}
+    return try await api.post("jobs/\(job.id)/preview", body: Empty(), token: token())
+  }
+  func startPreview(_ id: String) async throws -> WebPreview {
+    try await api.startPreview(id, token: token())
+  }
+  func loadPreview(_ id: String) async throws -> WebPreview {
+    try await api.get("previews/\(id)", token: token())
+  }
+  func closePreview(_ id: String) async {
+    struct Closed: Decodable, Sendable { let closed: Bool }
+    let _: Closed? = try? await api.delete("previews/\(id)", token: token())
+  }
   private func report(_ failure: Error) {
     let ns = failure as NSError
     guard !Task.isCancelled, !(failure is CancellationError),
@@ -366,11 +457,15 @@ final class PocketStore {
       guard let self else { return }
       defer { self.executionTasks[job.id] = nil }
       do {
-        let updated = try await self.api.startJob(job.id, token: self.token())
+        let updated = try await self.api.streamJob(job.id, token: self.token()) {
+          [weak self] text in
+          await MainActor.run { self?.partialReplies[job.id] = text }
+        }
         let finished =
           updated.status == .completed
           && self.jobs.contains { $0.id == updated.id && $0.status.isActive }
         if let i = self.jobs.firstIndex(where: { $0.id == updated.id }) { self.jobs[i] = updated }
+        if !updated.status.isActive { self.partialReplies[job.id] = nil }
         if finished { try await self.finishUpdates([updated]) }
         await self.refresh()
       } catch {

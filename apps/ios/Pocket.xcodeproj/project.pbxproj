@@ -18,6 +18,8 @@ ED9AA5629D660C1B68FFCBB6 = {isa = PBXBuildFile; fileRef = 479714A630484320124FE1
 A317D40560F7AD1CB73D8C1B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateRepositoryView.swift; sourceTree = "<group>"; };
 4EB7C9CD6C491E8FB022ED58 = {isa = PBXBuildFile; fileRef = A317D40560F7AD1CB73D8C1B; };
 
+A44244C56D6A42287B1AFA32 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewView.swift; sourceTree = "<group>"; };
+B44244C56D6A42287B1AFA32 = {isa = PBXBuildFile; fileRef = A44244C56D6A42287B1AFA32; };
 /* Begin PBXBuildFile section */
 		1767DDF39B8CDF6342F9906F /* PocketApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDEE954C10CC1C7597EA558 /* PocketApp.swift */; };
 		24DF3286CCD0626638EB6F0C /* Authentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = A82BCA2D9D9852AAF82FA8D5 /* Authentication.swift */; };
@@ -91,6 +93,7 @@ A317D40560F7AD1CB73D8C1B = {isa = PBXFileReference; lastKnownFileType = sourceco
 				1DF6C62AEDD71DB776AC847D /* ChatView.swift */,
 A317D40560F7AD1CB73D8C1B,
 479714A630484320124FE1C4,
+A44244C56D6A42287B1AFA32,
 				9BDEE954C10CC1C7597EA558 /* PocketApp.swift */,
 				7657A93EB382DC8C0BB1542E /* PocketStore.swift */,
 				E3426F4A4BE7CA6773068F9E /* ProjectsView.swift */,
@@ -182,6 +185,7 @@ DDE7358ED73CB1727DED16B3,
 				6F85CB2C03F6931DA8B92F7A /* ChatView.swift in Sources */,
 4EB7C9CD6C491E8FB022ED58,
 ED9AA5629D660C1B68FFCBB6,
+B44244C56D6A42287B1AFA32,
 				1767DDF39B8CDF6342F9906F /* PocketApp.swift in Sources */,
 				8217A90F5D8629E1B434BA05 /* PocketStore.swift in Sources */,
 				BF385CA7FE5356D84446C663 /* ProjectsView.swift in Sources */,

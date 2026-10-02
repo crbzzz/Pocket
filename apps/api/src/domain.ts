@@ -14,6 +14,8 @@ export const terminal = new Set<Phase>(['completed', 'failed', 'cancelled']);
 export const taskInput = z
   .object({
     projectId: z.string().uuid(),
+    baseJobId: z.uuid().optional(),
+    attachments: z.array(z.uuid()).max(2).default([]),
     branch: z
       .string()
       .min(1)
@@ -60,6 +62,8 @@ export interface Report {
   costCents: number;
 }
 export interface Job {
+  baseJobId?: string;
+  attachments?: string[];
   intent?: 'analysis' | 'change';
   id: string;
   projectId: string;

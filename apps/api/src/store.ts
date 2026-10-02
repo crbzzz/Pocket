@@ -57,11 +57,23 @@ export class Store implements JobQueue {
   }
   async create(
     user: string,
-    input: Pick<Job, 'projectId' | 'branch' | 'prompt' | 'modelId' | 'maxCostCents'>,
+    input: Pick<Job, 'projectId' | 'branch' | 'prompt' | 'modelId' | 'maxCostCents'> &
+      Pick<Job, 'baseJobId' | 'attachments'>,
     key: string,
     demo: boolean,
   ): Promise<Job> {
     const project = await this.project(user, input.projectId);
+    if (input.baseJobId) {
+      const base = await this.job(user, input.baseJobId);
+      if (
+        base.projectId !== input.projectId ||
+        base.branch !== input.branch ||
+        base.status !== 'completed' ||
+        !base.report?.snapshotRef ||
+        base.report.checkpointAvailable === false
+      )
+        throw new DomainError(409, 'Choose an available checkpoint on this branch');
+    }
     if (!project.branches.includes(input.branch))
       throw new DomainError(400, 'Branch is not available');
     return this.db.transaction(async (db) => {
@@ -73,7 +85,13 @@ export class Store implements JobQueue {
       ).rows[0];
       if (existing) {
         const job = existing.data as unknown as Job;
-        if (Object.entries(input).some(([k, v]) => job[k as keyof Job] !== v))
+        if (
+          Object.entries(input).some(
+            ([k, v]) =>
+              JSON.stringify(job[k as keyof Job] ?? (k === 'attachments' ? [] : undefined)) !==
+              JSON.stringify(v),
+          )
+        )
           throw new DomainError(409, 'Idempotency key was used for a different request');
         return job;
       }

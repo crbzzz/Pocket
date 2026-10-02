@@ -1,3 +1,4 @@
+import { sse, partialSummary } from './streaming.js';
 import { z } from 'zod';
 import { DomainError, type Model } from './domain.js';
 export const actionSchema = z.discriminatedUnion('kind', [
@@ -23,6 +24,7 @@ const actionTools = actionSchema.options.map((schema) => {
   const { kind: _kind, ...properties } = json.properties;
   return {
     name: toolPrefix + kind,
+    ...(kind === 'finish' ? { eager_input_streaming: true } : {}),
     description:
       kind === 'finish'
         ? 'Respond to the user with a useful summary in their language. Do not modify files for questions or summaries.'
@@ -58,13 +60,25 @@ function anthropicMessages(messages: Message[]) {
         content: [{ type: 'tool_result', tool_use_id: id, content: message.content }],
       };
     }
-    return message;
+    return message.images?.length
+      ? {
+          role: message.role,
+          content: [
+            ...message.images.map((image) => ({
+              type: 'image',
+              source: { type: 'base64', media_type: image.mimeType, data: image.data },
+            })),
+            { type: 'text', text: message.content },
+          ],
+        }
+      : { role: message.role, content: message.content };
   });
 }
 export type AgentAction = z.infer<typeof actionSchema>;
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
+  images?: { mimeType: string; data: string }[];
 }
 export interface ModelConfig extends Model {
   provider: 'openai' | 'anthropic' | 'google';
@@ -86,6 +100,7 @@ export interface LLMProvider {
     signal: AbortSignal,
     actionMode?: boolean,
     allowedKinds?: string[],
+    onReply?: (text: string) => void,
   ): Promise<Completion>;
 }
 const configs = z.array(
@@ -165,6 +180,7 @@ export class HTTPModels implements LLMProvider {
     signal: AbortSignal,
     actionMode = false,
     allowedKinds?: string[],
+    onReply?: (text: string) => void,
   ): Promise<Completion> {
     const key = process.env[envKeys[model.provider]];
     if (!key) throw new Error('Model credentials are not configured');
@@ -176,7 +192,21 @@ export class HTTPModels implements LLMProvider {
       headers.Authorization = `Bearer ${key}`;
       body = {
         model: model.model,
-        messages: [{ role: 'system', content: system }, ...messages],
+        messages: [
+          { role: 'system', content: system },
+          ...messages.map((m) => ({
+            role: m.role,
+            content: m.images?.length
+              ? [
+                  { type: 'text', text: m.content },
+                  ...m.images.map((image) => ({
+                    type: 'image_url',
+                    image_url: { url: `data:${image.mimeType};base64,${image.data}` },
+                  })),
+                ]
+              : m.content,
+          })),
+        ],
         max_completion_tokens: maxTokens,
       };
     } else if (model.provider === 'anthropic') {
@@ -186,7 +216,7 @@ export class HTTPModels implements LLMProvider {
       body = {
         model: model.model,
         system,
-        messages: actionMode ? anthropicMessages(messages) : messages,
+        messages: anthropicMessages(messages),
         max_tokens: maxTokens,
         ...(actionMode
           ? {
@@ -210,10 +240,25 @@ export class HTTPModels implements LLMProvider {
         systemInstruction: { parts: [{ text: system }] },
         contents: messages.map((m) => ({
           role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
+          parts: [
+            { text: m.content },
+            ...(m.images ?? []).map((image) => ({
+              inline_data: { mime_type: image.mimeType, data: image.data },
+            })),
+          ],
         })),
         generationConfig: { maxOutputTokens: maxTokens, responseMimeType: 'application/json' },
       };
+    }
+    if (onReply) {
+      if (model.provider === 'google')
+        url = url.replace(':generateContent', ':streamGenerateContent?alt=sse');
+      else
+        body = {
+          ...(body as object),
+          stream: true,
+          ...(model.provider === 'openai' ? { stream_options: { include_usage: true } } : {}),
+        };
     }
     const response = await fetch(url, {
       method: 'POST',
@@ -222,7 +267,69 @@ export class HTTPModels implements LLMProvider {
       signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]),
     });
     if (!response.ok) throw new Error(`Model service returned ${response.status}`);
-    const d = (await response.json()) as any;
+    let d: any;
+    if (onReply && response.headers.get('content-type')?.includes('text/event-stream')) {
+      let text = '',
+        input = 0,
+        output = 0,
+        toolName = '',
+        argumentsText = '',
+        lastEmit = 0;
+      const emit = () => {
+        const answer = partialSummary(toolName ? argumentsText : text);
+        if (answer && Date.now() - lastEmit > 80) {
+          onReply(answer);
+          lastEmit = Date.now();
+        }
+      };
+      for await (const event of sse(response)) {
+        if (event.type === 'error' || event.error) throw new Error('Model stream interrupted');
+        if (model.provider === 'anthropic') {
+          if (event.type === 'message_start') input = event.message?.usage?.input_tokens ?? input;
+          if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use')
+            toolName = event.content_block.name;
+          if (event.type === 'content_block_delta') {
+            if (event.delta?.type === 'input_json_delta')
+              argumentsText += event.delta.partial_json ?? '';
+            else if (event.delta?.type === 'text_delta') text += event.delta.text ?? '';
+          }
+          if (event.type === 'message_delta') output = event.usage?.output_tokens ?? output;
+          if (toolName === 'pocket_finish') emit();
+        } else if (model.provider === 'openai') {
+          text += event.choices?.[0]?.delta?.content ?? '';
+          input = event.usage?.prompt_tokens ?? input;
+          output = event.usage?.completion_tokens ?? output;
+          emit();
+        } else {
+          text +=
+            event.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? '').join('') ?? '';
+          input = event.usageMetadata?.promptTokenCount ?? input;
+          output = event.usageMetadata?.candidatesTokenCount ?? output;
+          emit();
+        }
+        if (text.length + argumentsText.length > 200000)
+          throw new Error('Model output exceeds limit');
+      }
+      if (toolName) {
+        try {
+          text = JSON.stringify({
+            ...JSON.parse(argumentsText),
+            kind: toolName.slice(toolPrefix.length),
+          });
+        } catch {
+          text = argumentsText;
+        }
+      }
+      const answer = partialSummary(text);
+      if (answer) onReply(answer);
+      return {
+        text,
+        inputTokens:
+          input || Buffer.byteLength(system + messages.map((m) => m.content).join('')) + 512,
+        outputTokens: output || maxTokens,
+      };
+    }
+    d = await response.json();
     const inputFallback = Buffer.byteLength(system + messages.map((m) => m.content).join('')) + 512;
     const normalize = (value: Completion) =>
       z

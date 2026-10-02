@@ -88,3 +88,23 @@ private final class CancelledRequestProtocol: URLProtocol, @unchecked Sendable {
     #expect(error is CancellationError)
   }
 }
+
+@Test func diffTracksActualOldAndNewFileLineNumbers() {
+  let file = DiffFile(
+    path: "a.swift", additions: 1, deletions: 1,
+    patch: "--- a/a.swift\n+++ b/a.swift\n@@ -10,2 +20,2 @@\n-old\n+new\n context")
+  #expect(file.lines[0].oldLine == nil)
+  #expect(file.lines[3].oldLine == 10)
+  #expect(file.lines[3].newLine == nil)
+  #expect(file.lines[4].newLine == 20)
+  #expect(file.lines[5].oldLine == 11)
+  #expect(file.lines[5].newLine == 21)
+}
+@Test func taskEncodesExplicitCheckpointAndImages() throws {
+  let task = TaskRequest(
+    projectId: "project", branch: "main", prompt: "Fix it", modelId: "auto", maxCostCents: 10,
+    attachments: ["image"], baseJobId: "checkpoint")
+  let value = try JSONSerialization.jsonObject(with: JSONEncoder().encode(task)) as! [String: Any]
+  #expect(value["baseJobId"] as? String == "checkpoint")
+  #expect(value["attachments"] as? [String] == ["image"])
+}
